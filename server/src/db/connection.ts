@@ -107,7 +107,9 @@ async function runMigrations(pool: sql.ConnectionPool): Promise<void> {
     BEGIN
       ALTER TABLE Comparisons ALTER COLUMN clientName NVARCHAR(256) NULL;
     END
+  `);
 
+  await pool.request().query(`
     IF NOT EXISTS (
       SELECT 1 FROM sys.columns 
       WHERE Name = N'comparisonType' AND Object_ID = Object_ID(N'Comparisons')
@@ -115,10 +117,6 @@ async function runMigrations(pool: sql.ConnectionPool): Promise<void> {
     BEGIN
       ALTER TABLE Comparisons ADD comparisonType NVARCHAR(20) NOT NULL CONSTRAINT DF_Comparisons_comparisonType DEFAULT 'client';
     END
-
-    UPDATE Comparisons
-    SET comparisonType = CASE WHEN clientName IS NULL OR LTRIM(RTRIM(clientName)) = '' THEN 'simple' ELSE 'client' END
-    WHERE comparisonType IS NULL OR comparisonType = '';
   `);
 
   await pool.request().query(`
