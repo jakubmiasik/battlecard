@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import sql from 'mssql';
 import { getPool } from '../db/connection.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -9,6 +10,7 @@ const router = Router();
 router.post('/login', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { oid, email, name } = req.user!;
+    const normalizedEmail = email.trim().toLowerCase();
     const pool = await getPool();
 
     // Check if user exists
@@ -22,6 +24,29 @@ router.post('/login', authMiddleware, async (req: AuthRequest, res: Response) =>
       return;
     }
 
+    const invitedUser = await pool
+      .request()
+      .input('email', sql.NVarChar, normalizedEmail)
+      .query('SELECT * FROM AppUsers WHERE email = @email');
+
+    if (invitedUser.recordset.length > 0 && !invitedUser.recordset[0].entraObjectId) {
+      const linkedUser = await pool
+        .request()
+        .input('id', sql.Int, invitedUser.recordset[0].id)
+        .input('oid', sql.NVarChar, oid)
+        .input('email', sql.NVarChar, normalizedEmail)
+        .input('name', sql.NVarChar, name)
+        .query(`
+          UPDATE AppUsers
+          SET entraObjectId = @oid, email = @email, displayName = @name, updatedAt = GETUTCDATE()
+          OUTPUT INSERTED.*
+          WHERE id = @id
+        `);
+
+      res.json(linkedUser.recordset[0]);
+      return;
+    }
+
     // Check if first user → make admin
     const userCount = await pool.request().query('SELECT COUNT(*) as cnt FROM AppUsers');
     const role = userCount.recordset[0].cnt === 0 ? 'admin' : 'explorer';
@@ -29,7 +54,7 @@ router.post('/login', authMiddleware, async (req: AuthRequest, res: Response) =>
     const result = await pool
       .request()
       .input('oid', oid)
-      .input('email', email)
+      .input('email', normalizedEmail)
       .input('name', name)
       .input('role', role)
       .query(

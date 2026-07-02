@@ -30,13 +30,57 @@ async function runMigrations(pool: sql.ConnectionPool): Promise<void> {
     IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'AppUsers')
     CREATE TABLE AppUsers (
       id INT IDENTITY(1,1) PRIMARY KEY,
-      entraObjectId NVARCHAR(128) UNIQUE NOT NULL,
+      entraObjectId NVARCHAR(128) NULL,
       email NVARCHAR(256) NOT NULL,
       displayName NVARCHAR(256) NOT NULL,
       role NVARCHAR(20) NOT NULL DEFAULT 'explorer',
       createdAt DATETIME2 DEFAULT GETUTCDATE(),
       updatedAt DATETIME2 DEFAULT GETUTCDATE()
     );
+  `);
+
+  await pool.request().query(`
+    DECLARE @constraintName NVARCHAR(128);
+
+    SELECT TOP 1 @constraintName = kc.name
+    FROM sys.key_constraints kc
+    INNER JOIN sys.index_columns ic
+      ON ic.object_id = kc.parent_object_id
+      AND ic.index_id = kc.unique_index_id
+    INNER JOIN sys.columns c
+      ON c.object_id = ic.object_id
+      AND c.column_id = ic.column_id
+    WHERE kc.parent_object_id = OBJECT_ID(N'AppUsers')
+      AND kc.[type] = 'UQ'
+      AND c.name = 'entraObjectId';
+
+    IF @constraintName IS NOT NULL
+    BEGIN
+      EXEC('ALTER TABLE AppUsers DROP CONSTRAINT [' + @constraintName + ']');
+    END
+
+    IF EXISTS (
+      SELECT 1
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID(N'AppUsers')
+        AND name = 'entraObjectId'
+        AND is_nullable = 0
+    )
+    BEGIN
+      ALTER TABLE AppUsers ALTER COLUMN entraObjectId NVARCHAR(128) NULL;
+    END
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM sys.indexes
+      WHERE object_id = OBJECT_ID(N'AppUsers')
+        AND name = 'UX_AppUsers_entraObjectId_not_null'
+    )
+    BEGIN
+      CREATE UNIQUE INDEX UX_AppUsers_entraObjectId_not_null
+      ON AppUsers (entraObjectId)
+      WHERE entraObjectId IS NOT NULL;
+    END
   `);
 
   await pool.request().query(`

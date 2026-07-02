@@ -42,6 +42,8 @@ export const authApi = {
 
 export const usersApi = {
   list: () => fetchApi('/api/users'),
+  invite: (data: { email: string; displayName: string; role: string }) =>
+    fetchApi('/api/users', { method: 'POST', body: JSON.stringify(data) }),
   updateRole: (id: number, role: string) =>
     fetchApi(`/api/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ role }) }),
   delete: (id: number) => fetchApi(`/api/users/${id}`, { method: 'DELETE' }),

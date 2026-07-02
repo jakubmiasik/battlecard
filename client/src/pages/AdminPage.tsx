@@ -8,6 +8,7 @@ interface User {
   email: string;
   displayName: string;
   role: string;
+  entraObjectId?: string | null;
 }
 
 interface Technology {
@@ -43,6 +44,18 @@ interface DefaultWeight {
   weight: number;
 }
 
+interface InviteFormState {
+  email: string;
+  displayName: string;
+  role: 'admin' | 'explorer';
+}
+
+interface NewCriterionDraft {
+  tempId: string;
+  name: string;
+  definition: string;
+}
+
 const SCORE_LABELS: Record<number, string> = {
   1: 'Poor',
   2: 'Weak',
@@ -58,6 +71,12 @@ export default function AdminPage() {
 
   const [users, setUsers] = useState<User[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
+  const [inviteSaving, setInviteSaving] = useState(false);
+  const [inviteForm, setInviteForm] = useState<InviteFormState>({
+    email: '',
+    displayName: '',
+    role: 'explorer',
+  });
 
   const [technologies, setTechnologies] = useState<Technology[]>([]);
   const [newTechName, setNewTechName] = useState('');
@@ -66,7 +85,7 @@ export default function AdminPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [defaultWeights, setDefaultWeights] = useState<Record<number, number>>({});
   const [newCategoryName, setNewCategoryName] = useState('');
-  const [newCriteriaDrafts, setNewCriteriaDrafts] = useState<Record<number, { name: string; definition: string }>>({});
+  const [newCriteriaDrafts, setNewCriteriaDrafts] = useState<Record<number, NewCriterionDraft[]>>({});
   const [editingCategories, setEditingCategories] = useState<Record<number, string>>({});
   const [editingCriteria, setEditingCriteria] = useState<Record<number, { name: string; definition: string }>>({});
   const [weightsSaving, setWeightsSaving] = useState(false);
@@ -128,6 +147,25 @@ export default function AdminPage() {
     if (!confirm('Delete this user?')) return;
     await usersApi.delete(userId);
     loadUsers();
+  };
+
+  const handleInviteUser = async () => {
+    if (!inviteForm.email.trim() || !inviteForm.displayName.trim()) return;
+
+    setInviteSaving(true);
+    try {
+      await usersApi.invite({
+        email: inviteForm.email.trim(),
+        displayName: inviteForm.displayName.trim(),
+        role: inviteForm.role,
+      });
+      setInviteForm({ email: '', displayName: '', role: 'explorer' });
+      await loadUsers();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to invite user');
+    } finally {
+      setInviteSaving(false);
+    }
   };
 
   const handleAddTech = async () => {
@@ -201,15 +239,39 @@ export default function AdminPage() {
     loadBaseData();
   };
 
-  const handleAddCriterion = async (categoryId: number) => {
-    const draft = newCriteriaDrafts[categoryId];
-    if (!draft?.name?.trim()) return;
+  const handleAddCriterionDraft = (categoryId: number) => {
+    const tempId = `new-${categoryId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setNewCriteriaDrafts((prev) => ({
+      ...prev,
+      [categoryId]: [...(prev[categoryId] || []), { tempId, name: '', definition: '' }],
+    }));
+  };
+
+  const handleUpdateCriterionDraft = (categoryId: number, tempId: string, field: 'name' | 'definition', value: string) => {
+    setNewCriteriaDrafts((prev) => ({
+      ...prev,
+      [categoryId]: (prev[categoryId] || []).map((draft) => (draft.tempId === tempId ? { ...draft, [field]: value } : draft)),
+    }));
+  };
+
+  const handleDiscardCriterionDraft = (categoryId: number, tempId: string) => {
+    setNewCriteriaDrafts((prev) => ({
+      ...prev,
+      [categoryId]: (prev[categoryId] || []).filter((draft) => draft.tempId !== tempId),
+    }));
+  };
+
+  const handleAddCriterion = async (categoryId: number, draft: NewCriterionDraft) => {
+    if (!draft.name.trim()) return;
     await questionsApi.createCriterion({
       categoryId,
       name: draft.name.trim(),
       definition: draft.definition.trim(),
     });
-    setNewCriteriaDrafts((prev) => ({ ...prev, [categoryId]: { name: '', definition: '' } }));
+    setNewCriteriaDrafts((prev) => ({
+      ...prev,
+      [categoryId]: (prev[categoryId] || []).filter((item) => item.tempId !== draft.tempId),
+    }));
     loadBaseData();
   };
 
@@ -284,42 +346,81 @@ export default function AdminPage() {
       </div>
 
       {activeTab === 'users' && (
-        <section className="card table-card">
-          <h3>User management</h3>
-          {usersLoading ? (
-            <div className="loading">Loading users...</div>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.id}>
-                    <td>{user.displayName}</td>
-                    <td>{user.email}</td>
-                    <td>
-                      <select value={user.role} onChange={(event) => handleRoleChange(user.id, event.target.value)}>
-                        <option value="explorer">Explorer</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                    </td>
-                    <td>
-                      <button className="btn btn-danger btn-sm" onClick={() => handleDeleteUser(user.id)}>
-                        Delete
-                      </button>
-                    </td>
+        <div className="page-stack">
+          <section className="card form-card">
+            <div className="section-heading-row">
+              <div>
+                <h3>Invite user</h3>
+                <p className="muted">Grant access before a person signs in for the first time.</p>
+              </div>
+            </div>
+            <div className="inline-form responsive-inline">
+              <input
+                type="email"
+                placeholder="Email"
+                value={inviteForm.email}
+                onChange={(event) => setInviteForm((prev) => ({ ...prev, email: event.target.value }))}
+              />
+              <input
+                placeholder="Display name"
+                value={inviteForm.displayName}
+                onChange={(event) => setInviteForm((prev) => ({ ...prev, displayName: event.target.value }))}
+              />
+              <select value={inviteForm.role} onChange={(event) => setInviteForm((prev) => ({ ...prev, role: event.target.value as InviteFormState['role'] }))}>
+                <option value="explorer">Explorer</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button className="btn btn-primary" onClick={handleInviteUser} disabled={inviteSaving}>
+                {inviteSaving ? 'Inviting...' : 'Invite'}
+              </button>
+            </div>
+          </section>
+
+          <section className="card table-card">
+            <h3>User management</h3>
+            {usersLoading ? (
+              <div className="loading">Loading users...</div>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Role</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
+                </thead>
+                <tbody>
+                  {users.map((user) => {
+                    const isPending = !user.entraObjectId;
+
+                    return (
+                      <tr key={user.id}>
+                        <td>{user.displayName}</td>
+                        <td>{user.email}</td>
+                        <td>
+                          <span className={`pill ${isPending ? 'pill-warning' : 'pill-success'}`}>{isPending ? 'Pending' : 'Active'}</span>
+                        </td>
+                        <td>
+                          <select value={user.role} onChange={(event) => handleRoleChange(user.id, event.target.value)}>
+                            <option value="explorer">Explorer</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        </td>
+                        <td>
+                          <button className="btn btn-danger btn-sm" onClick={() => handleDeleteUser(user.id)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </section>
+        </div>
       )}
 
       {activeTab === 'technologies' && (
@@ -459,6 +560,21 @@ export default function AdminPage() {
 
       {activeTab === 'questions' && (
         <div className="page-stack">
+          <section className="card form-card question-framework-top">
+            <div className="section-heading-row">
+              <div>
+                <h3>Question framework</h3>
+                <p className="muted">Add, edit, remove, and reorder categories and criteria.</p>
+              </div>
+            </div>
+            <div className="inline-form responsive-inline">
+              <input placeholder="New category name" value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} />
+              <button className="btn btn-secondary" onClick={handleAddCategory}>
+                Add category
+              </button>
+            </div>
+          </section>
+
           <section className="card form-card">
             <div className="section-heading-row">
               <div>
@@ -495,132 +611,145 @@ export default function AdminPage() {
             </div>
           </section>
 
-          <section className="card form-card">
-            <div className="section-heading-row">
-              <div>
-                <h3>Question framework</h3>
-                <p className="muted">Add, edit, remove, and reorder categories and criteria.</p>
-              </div>
-            </div>
-
-            <div className="inline-form responsive-inline">
-              <input placeholder="New category name" value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} />
-              <button className="btn btn-secondary" onClick={handleAddCategory}>
-                Add category
-              </button>
-            </div>
-
-            <div className="question-groups">
-              {categories.map((category, categoryIndex) => (
-                <section className="question-group" key={category.id}>
-                  <div className="question-group-header">
-                    <div className="inline-form responsive-inline">
-                      <input
-                        value={editingCategories[category.id] ?? category.name}
-                        onChange={(event) => setEditingCategories((prev) => ({ ...prev, [category.id]: event.target.value }))}
-                      />
-                      <button className="btn btn-secondary btn-sm" onClick={() => handleSaveCategory(category)}>
-                        Save
-                      </button>
-                    </div>
-                    <div className="icon-button-row">
-                      <button className="btn btn-ghost btn-sm" onClick={() => handleMoveCategory(categoryIndex, -1)}>
-                        ↑
-                      </button>
-                      <button className="btn btn-ghost btn-sm" onClick={() => handleMoveCategory(categoryIndex, 1)}>
-                        ↓
-                      </button>
-                      <button className="btn btn-danger btn-sm" onClick={() => handleDeleteCategory(category.id)}>
-                        Delete
-                      </button>
-                    </div>
+          <div className="question-groups">
+            {categories.map((category, categoryIndex) => (
+              <section className="card table-card" key={category.id}>
+                <div className="question-group-header">
+                  <div className="question-category-heading">
+                    <input
+                      value={editingCategories[category.id] ?? category.name}
+                      onChange={(event) => setEditingCategories((prev) => ({ ...prev, [category.id]: event.target.value }))}
+                    />
                   </div>
-
-                  <div className="criteria-list">
-                    {category.criteria.map((criterion, criterionIndex) => (
-                      <div className="criteria-item" key={criterion.id}>
-                        <div className="criteria-edit-grid">
-                          <input
-                            value={editingCriteria[criterion.id]?.name ?? criterion.name}
-                            onChange={(event) =>
-                              setEditingCriteria((prev) => ({
-                                ...prev,
-                                [criterion.id]: {
-                                  name: event.target.value,
-                                  definition: prev[criterion.id]?.definition ?? criterion.definition,
-                                },
-                              }))
-                            }
-                          />
-                          <textarea
-                            value={editingCriteria[criterion.id]?.definition ?? criterion.definition}
-                            onChange={(event) =>
-                              setEditingCriteria((prev) => ({
-                                ...prev,
-                                [criterion.id]: {
-                                  name: prev[criterion.id]?.name ?? criterion.name,
-                                  definition: event.target.value,
-                                },
-                              }))
-                            }
-                          />
-                        </div>
-                        <div className="icon-button-row">
-                          <button className="btn btn-secondary btn-sm" onClick={() => handleSaveCriterion(criterion)}>
-                            Save
-                          </button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => handleMoveCriterion(category, criterionIndex, -1)}>
-                            ↑
-                          </button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => handleMoveCriterion(category, criterionIndex, 1)}>
-                            ↓
-                          </button>
-                          <button className="btn btn-danger btn-sm" onClick={() => handleDeleteCriterion(criterion.id)}>
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="subtle-panel">
-                    <h4>Add criterion</h4>
-                    <div className="criteria-edit-grid compact-grid">
-                      <input
-                        placeholder="Criterion name"
-                        value={newCriteriaDrafts[category.id]?.name || ''}
-                        onChange={(event) =>
-                          setNewCriteriaDrafts((prev) => ({
-                            ...prev,
-                            [category.id]: {
-                              name: event.target.value,
-                              definition: prev[category.id]?.definition || '',
-                            },
-                          }))
-                        }
-                      />
-                      <textarea
-                        placeholder="Definition"
-                        value={newCriteriaDrafts[category.id]?.definition || ''}
-                        onChange={(event) =>
-                          setNewCriteriaDrafts((prev) => ({
-                            ...prev,
-                            [category.id]: {
-                              name: prev[category.id]?.name || '',
-                              definition: event.target.value,
-                            },
-                          }))
-                        }
-                      />
-                    </div>
-                    <button className="btn btn-secondary btn-sm" onClick={() => handleAddCriterion(category.id)}>
-                      Add criterion
+                  <div className="icon-button-row">
+                    <button className="btn btn-secondary btn-sm" onClick={() => handleSaveCategory(category)}>
+                      Save
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleMoveCategory(categoryIndex, -1)}>
+                      ↑
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleMoveCategory(categoryIndex, 1)}>
+                      ↓
+                    </button>
+                    <button className="btn btn-danger btn-sm" onClick={() => handleDeleteCategory(category.id)}>
+                      Delete
                     </button>
                   </div>
-                </section>
-              ))}
-            </div>
-          </section>
+                </div>
+
+                <div className="question-group-toolbar">
+                  <button className="btn btn-secondary btn-sm" onClick={() => handleAddCriterionDraft(category.id)}>
+                    + Add Criterion
+                  </button>
+                </div>
+
+                <div className="comparison-table-scroll">
+                  <table className="question-framework-table">
+                    <thead>
+                      <tr>
+                        <th>Criterion</th>
+                        <th>Definition</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(newCriteriaDrafts[category.id] || []).map((draft) => (
+                        <tr key={draft.tempId}>
+                          <td>
+                            <input
+                              placeholder="Criterion name"
+                              value={draft.name}
+                              onChange={(event) => handleUpdateCriterionDraft(category.id, draft.tempId, 'name', event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <textarea
+                              placeholder="Definition"
+                              value={draft.definition}
+                              onChange={(event) => handleUpdateCriterionDraft(category.id, draft.tempId, 'definition', event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <div className="question-actions-cell">
+                              <button className="btn btn-secondary btn-sm" onClick={() => handleAddCriterion(category.id, draft)}>
+                                Save
+                              </button>
+                              <button className="btn btn-danger btn-sm" onClick={() => handleDiscardCriterionDraft(category.id, draft.tempId)}>
+                                Delete
+                              </button>
+                              <button className="btn btn-ghost btn-sm" disabled>
+                                ↑
+                              </button>
+                              <button className="btn btn-ghost btn-sm" disabled>
+                                ↓
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {category.criteria.map((criterion, criterionIndex) => (
+                        <tr key={criterion.id}>
+                          <td>
+                            <input
+                              value={editingCriteria[criterion.id]?.name ?? criterion.name}
+                              onChange={(event) =>
+                                setEditingCriteria((prev) => ({
+                                  ...prev,
+                                  [criterion.id]: {
+                                    name: event.target.value,
+                                    definition: prev[criterion.id]?.definition ?? criterion.definition,
+                                  },
+                                }))
+                              }
+                            />
+                          </td>
+                          <td>
+                            <textarea
+                              value={editingCriteria[criterion.id]?.definition ?? criterion.definition}
+                              onChange={(event) =>
+                                setEditingCriteria((prev) => ({
+                                  ...prev,
+                                  [criterion.id]: {
+                                    name: prev[criterion.id]?.name ?? criterion.name,
+                                    definition: event.target.value,
+                                  },
+                                }))
+                              }
+                            />
+                          </td>
+                          <td>
+                            <div className="question-actions-cell">
+                              <button className="btn btn-secondary btn-sm" onClick={() => handleSaveCriterion(criterion)}>
+                                Save
+                              </button>
+                              <button className="btn btn-danger btn-sm" onClick={() => handleDeleteCriterion(criterion.id)}>
+                                Delete
+                              </button>
+                              <button className="btn btn-ghost btn-sm" onClick={() => handleMoveCriterion(category, criterionIndex, -1)}>
+                                ↑
+                              </button>
+                              <button className="btn btn-ghost btn-sm" onClick={() => handleMoveCriterion(category, criterionIndex, 1)}>
+                                ↓
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {category.criteria.length === 0 && (newCriteriaDrafts[category.id] || []).length === 0 && (
+                        <tr>
+                          <td colSpan={3} className="muted">
+                            No criteria yet. Use &quot;+ Add Criterion&quot; to create the first one.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
+          </div>
         </div>
       )}
     </div>
