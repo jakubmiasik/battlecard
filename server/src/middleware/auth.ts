@@ -40,12 +40,16 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
     token,
     getKey,
     {
-      audience: clientId,
-      issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
+      audience: [clientId, `api://${clientId}`],
+      issuer: [
+        `https://login.microsoftonline.com/${tenantId}/v2.0`,
+        `https://sts.windows.net/${tenantId}/`,
+      ],
       algorithms: ['RS256'],
     },
     (err, decoded) => {
       if (err) {
+        console.error('Token validation error:', err.message);
         res.status(401).json({ error: 'Invalid token' });
         return;
       }
