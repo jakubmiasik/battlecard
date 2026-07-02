@@ -122,7 +122,7 @@ export default function EditComparisonPage() {
       await comparisonsApi.updateTechnologies(comparisonId, selectedTechs);
       await comparisonsApi.saveWeights(comparisonId, weights);
 
-      navigate(`/comparison/${comparisonId}`);
+      navigate('/');
     } catch (error) {
       setModal({
         title: 'Unable to save changes',
