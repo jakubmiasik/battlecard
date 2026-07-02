@@ -478,8 +478,9 @@ textarea:focus {
 }
 
 .sidebar-score-inline {
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.65rem;
+  font-weight: 400;
+  padding: 0.2rem 0.55rem;
 }
 
 .sidebar-tech-progress {
