@@ -108,6 +108,32 @@ router.put('/:id/role', requireRole('admin'), async (req: AuthRequest, res: Resp
   }
 });
 
+router.put('/:id/status', requireRole('admin'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { status } = req.body;
+    if (!['active', 'blocked'].includes(status)) {
+      res.status(400).json({ error: 'Invalid status. Must be active or blocked.' });
+      return;
+    }
+
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input('id', sql.Int, parseInt(req.params.id, 10))
+      .input('status', sql.NVarChar, status)
+      .query('UPDATE AppUsers SET status = @status, updatedAt = GETUTCDATE() OUTPUT INSERTED.* WHERE id = @id');
+
+    if (result.recordset.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    res.json(result.recordset[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
 // Delete user (admin only)
 router.delete('/:id', requireRole('admin'), async (req: AuthRequest, res: Response) => {
   try {

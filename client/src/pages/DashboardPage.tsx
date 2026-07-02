@@ -26,14 +26,31 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
+  const loadComparisons = async () => {
+    setLoading(true);
+    try {
+      const data = await comparisonsApi.list();
+      setComparisons(data);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    comparisonsApi.list().then(setComparisons).finally(() => setLoading(false));
+    loadComparisons();
   }, []);
 
   const handleDelete = async (id: number) => {
     if (!confirm('Delete this comparison?')) return;
     await comparisonsApi.delete(id);
     setComparisons((prev) => prev.filter((comparison) => comparison.id !== id));
+  };
+
+  const handleToggleStatus = async (comparison: Comparison) => {
+    const newStatus = comparison.status === 'official' ? 'draft' : 'official';
+    if (!window.confirm(`Change status to ${newStatus === 'official' ? 'Official' : 'Draft'}?`)) return;
+    await comparisonsApi.update(comparison.id, { status: newStatus });
+    await loadComparisons();
   };
 
   if (loading) return <div className="loading">Loading comparisons...</div>;
@@ -73,9 +90,14 @@ export default function DashboardPage() {
                     <span className="pill pill-muted">
                       {comparison.comparisonType === 'simple' ? 'Simple comparison' : 'Client comparison'}
                     </span>
-                    <span className={`pill ${comparison.status === 'completed' ? 'pill-success' : 'pill-outline'}`}>
+                    <button
+                      type="button"
+                      className={`pill comparison-status-pill ${comparison.status === 'official' ? 'pill-success' : 'pill-outline'}`}
+                      onClick={() => handleToggleStatus(comparison)}
+                      title="Click to change status between Draft and Official"
+                    >
                       {comparison.status}
-                    </span>
+                    </button>
                   </div>
                   <h3>{comparison.clientName || 'Untitled simple comparison'}</h3>
                   <p className="muted">
@@ -108,7 +130,11 @@ export default function DashboardPage() {
 
               <div className="tech-progress-list">
                 {comparison.technologyProgress.map((item) => (
-                  <span className="progress-tag" key={item.technologyId}>
+                  <span
+                    className="progress-tag"
+                    key={item.technologyId}
+                    title="Criteria scored out of total for this technology"
+                  >
                     {item.technologyName}: {item.scoredCount}/{item.totalCriteria}
                   </span>
                 ))}

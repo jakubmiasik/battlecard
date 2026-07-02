@@ -45,11 +45,6 @@ export default function Navbar() {
                   <strong>{user?.displayName}</strong>
                   <span>{user?.email}</span>
                 </div>
-                {isAdmin && (
-                  <Link to="/admin" className="dropdown-link" onClick={() => setMenuOpen(false)}>
-                    Open admin panel
-                  </Link>
-                )}
                 <button className="dropdown-link danger" onClick={logout}>
                   Sign out
                 </button>

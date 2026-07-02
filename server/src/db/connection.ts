@@ -84,6 +84,16 @@ async function runMigrations(pool: sql.ConnectionPool): Promise<void> {
   `);
 
   await pool.request().query(`
+    IF NOT EXISTS (
+      SELECT 1 FROM sys.columns
+      WHERE Name = N'status' AND Object_ID = Object_ID(N'AppUsers')
+    )
+    BEGIN
+      ALTER TABLE AppUsers ADD status NVARCHAR(20) NOT NULL CONSTRAINT DF_AppUsers_status DEFAULT 'active';
+    END
+  `);
+
+  await pool.request().query(`
     IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Technologies')
     CREATE TABLE Technologies (
       id INT IDENTITY(1,1) PRIMARY KEY,

@@ -46,6 +46,8 @@ export const usersApi = {
     fetchApi('/api/users', { method: 'POST', body: JSON.stringify(data) }),
   updateRole: (id: number, role: string) =>
     fetchApi(`/api/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ role }) }),
+  updateStatus: (id: number, status: string) =>
+    fetchApi(`/api/users/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   delete: (id: number) => fetchApi(`/api/users/${id}`, { method: 'DELETE' }),
 };
 

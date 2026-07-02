@@ -13,9 +13,19 @@ export function requireRole(...roles: string[]) {
     const result = await pool
       .request()
       .input('oid', req.user.oid)
-      .query('SELECT role FROM AppUsers WHERE entraObjectId = @oid');
+      .query('SELECT role, status FROM AppUsers WHERE entraObjectId = @oid');
 
-    if (result.recordset.length === 0 || !roles.includes(result.recordset[0].role)) {
+    if (result.recordset.length === 0) {
+      res.status(403).json({ error: 'Insufficient permissions' });
+      return;
+    }
+
+    if (result.recordset[0].status === 'blocked') {
+      res.status(403).json({ error: 'Account is blocked' });
+      return;
+    }
+
+    if (!roles.includes(result.recordset[0].role)) {
       res.status(403).json({ error: 'Insufficient permissions' });
       return;
     }

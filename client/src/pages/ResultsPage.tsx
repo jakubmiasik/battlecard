@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Fragment } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { comparisonsApi } from '../services/api';
 
@@ -24,6 +25,15 @@ interface ResultsData {
   results: TechResult[];
 }
 
+interface ComparisonScore {
+  technologyId: number;
+  categoryId: number;
+  criteriaId: number;
+  criteriaName: string;
+  score: number;
+  justification?: string | null;
+}
+
 function getScoreClass(score: number): string {
   if (score >= 4.5) return 'excellent';
   if (score >= 3.5) return 'strong';
@@ -43,6 +53,7 @@ export default function ResultsPage() {
   const navigate = useNavigate();
   const [results, setResults] = useState<ResultsData | null>(null);
   const [comparison, setComparison] = useState<any>(null);
+  const [expandedCategories, setExpandedCategories] = useState<Record<number, boolean>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -56,6 +67,34 @@ export default function ResultsPage() {
   }, [id]);
 
   const winner = useMemo(() => results?.results[0] ?? null, [results]);
+  const detailedScores = useMemo<ComparisonScore[]>(() => comparison?.scores || [], [comparison]);
+  const criteriaByCategory = useMemo(() => {
+    const grouped = new Map<number, { criteriaId: number; criteriaName: string }[]>();
+
+    detailedScores.forEach((score) => {
+      const existing = grouped.get(score.categoryId) ?? [];
+      if (!existing.some((item) => item.criteriaId === score.criteriaId)) {
+        existing.push({ criteriaId: score.criteriaId, criteriaName: score.criteriaName });
+      }
+      grouped.set(score.categoryId, existing);
+    });
+
+    return grouped;
+  }, [detailedScores]);
+  const detailedScoreMap = useMemo(() => {
+    const map: Record<string, ComparisonScore> = {};
+    detailedScores.forEach((score) => {
+      map[`${score.categoryId}-${score.criteriaId}-${score.technologyId}`] = score;
+    });
+    return map;
+  }, [detailedScores]);
+
+  const toggleCategory = (categoryId: number) => {
+    setExpandedCategories((prev) => ({
+      ...prev,
+      [categoryId]: !prev[categoryId],
+    }));
+  };
 
   if (loading) return <div className="loading">Calculating results...</div>;
   if (!results) return <div className="loading">No results available</div>;
@@ -87,7 +126,9 @@ export default function ResultsPage() {
         {winner && (
           <div className="winner-score-block">
             <div className={`score-label ${getScoreClass(winner.finalScore)}`}>{winner.finalScore.toFixed(2)}</div>
-            <span className="pill pill-success">Top ranked</span>
+            <span className="pill pill-success" title="Technology with the highest weighted score across all categories">
+              Top ranked
+            </span>
           </div>
         )}
       </section>
@@ -118,35 +159,70 @@ export default function ResultsPage() {
             <thead>
               <tr>
                 <th>Category</th>
-                <th>Weight</th>
+                <th title="Multiplier applied to this category's average score">Weight</th>
                 {results.results.map((tech) => (
                   <th key={tech.technologyId}>{tech.technologyName}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {results.results[0]?.categoryResults.map((category) => (
-                <tr key={category.categoryId}>
-                  <td>
-                    <strong>{category.categoryName}</strong>
-                  </td>
-                  <td>{category.weight}x</td>
-                  {results.results.map((tech) => {
-                    const techCategory = tech.categoryResults.find((item) => item.categoryId === category.categoryId);
-                    return (
-                      <td key={tech.technologyId}>
-                        <div className={`score-inline ${getScoreClass(techCategory?.avgScore || 0)}`}>
-                          {(techCategory?.avgScore || 0).toFixed(2)}
-                        </div>
-                        <span className="muted small-text">
-                          {techCategory?.scoredCriteria || 0}/{techCategory?.totalCriteria || 0} answered
-                        </span>
+              {results.results[0]?.categoryResults.map((category) => {
+                const isExpanded = !!expandedCategories[category.categoryId];
+                const criteria = criteriaByCategory.get(category.categoryId) ?? [];
+
+                return (
+                  <Fragment key={category.categoryId}>
+                    <tr
+                      className="results-category-row"
+                      onClick={() => toggleCategory(category.categoryId)}
+                      title={isExpanded ? 'Collapse category details' : 'Expand category details'}
+                    >
+                      <td>
+                        <button type="button" className="results-category-toggle">
+                          <span aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
+                          <strong>{category.categoryName}</strong>
+                        </button>
                       </td>
-                    );
-                  })}
-                </tr>
-              ))}
-              <tr className="summary-row">
+                      <td>{category.weight}x</td>
+                      {results.results.map((tech) => {
+                        const techCategory = tech.categoryResults.find((item) => item.categoryId === category.categoryId);
+                        return (
+                          <td key={tech.technologyId}>
+                            <div className={`score-inline ${getScoreClass(techCategory?.avgScore || 0)}`}>
+                              {(techCategory?.avgScore || 0).toFixed(2)}
+                            </div>
+                            <span className="muted small-text">
+                              {techCategory?.scoredCriteria || 0}/{techCategory?.totalCriteria || 0} answered
+                            </span>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {isExpanded &&
+                      criteria.map((criterion) => (
+                        <tr className="results-detail-row" key={`${category.categoryId}-${criterion.criteriaId}`}>
+                          <td>
+                            <span className="results-detail-label">{criterion.criteriaName}</span>
+                          </td>
+                          <td className="muted small-text">Criterion</td>
+                          {results.results.map((tech) => {
+                            const detail = detailedScoreMap[`${category.categoryId}-${criterion.criteriaId}-${tech.technologyId}`];
+                            return (
+                              <td key={tech.technologyId}>
+                                {detail ? (
+                                  <span className={`score-inline ${getScoreClass(detail.score)}`}>{detail.score.toFixed(2)}</span>
+                                ) : (
+                                  <span className="muted small-text">Not scored</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                  </Fragment>
+                );
+              })}
+              <tr className="summary-row" title="Overall score = sum(category avg × weight) / sum(weights)">
                 <td>Final weighted score</td>
                 <td />
                 {results.results.map((tech) => (

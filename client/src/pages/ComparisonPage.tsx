@@ -16,6 +16,8 @@ interface Technology {
 interface Score {
   technologyId: number;
   criteriaId: number;
+  categoryId?: number;
+  criteriaName?: string;
   score: number;
   justification: string;
 }
@@ -32,6 +34,14 @@ const SCORE_LABELS: Record<number, string> = {
   4: 'Strong',
   5: 'Excellent',
 };
+
+function getScoreClass(score: number): string {
+  if (score >= 4.5) return 'excellent';
+  if (score >= 3.5) return 'strong';
+  if (score >= 2.5) return 'acceptable';
+  if (score >= 1.5) return 'weak';
+  return 'poor';
+}
 
 function getComparisonHeading(comparison: { clientName?: string | null; comparisonType?: string }) {
   return comparison.comparisonType === 'simple' ? comparison.clientName || 'Simple comparison' : comparison.clientName || 'Untitled client comparison';
@@ -52,7 +62,7 @@ export default function ComparisonPage() {
     Promise.all([comparisonsApi.get(parseInt(id!, 10)), criteriaApi.list()]).then(([comp, cats]) => {
       setComparison(comp);
       setCategories(cats);
-      setActiveCategory(cats[0]?.id || null);
+      setActiveCategory(null);
 
       const scoreMap: Record<string, Score> = {};
       comp.scores?.forEach((score: Score) => {
@@ -109,17 +119,28 @@ export default function ComparisonPage() {
   };
 
   const activeCat = categories.find((category) => category.id === activeCategory);
+  const visibleCategories = activeCategory === null ? categories : activeCat ? [activeCat] : [];
 
   const categoryProgress = useMemo(() => {
-    if (!comparison) return {} as Record<number, { technologyId: number; technologyName: string; scored: number; total: number }[]>;
+    if (!comparison) {
+      return {} as Record<number, { technologyId: number; technologyName: string; scored: number; total: number; avgScore: number | null }[]>;
+    }
 
-    const progress: Record<number, { technologyId: number; technologyName: string; scored: number; total: number }[]> = {};
+    const progress: Record<number, { technologyId: number; technologyName: string; scored: number; total: number; avgScore: number | null }[]> = {};
     for (const category of categories) {
       progress[category.id] = comparison.technologies.map((technology: Technology) => ({
         technologyId: technology.id,
         technologyName: technology.name,
         scored: category.criteria.filter((criterion) => scores[`${technology.id}-${criterion.id}`]?.score).length,
         total: category.criteria.length,
+        avgScore: (() => {
+          const scoredValues = category.criteria
+            .map((criterion) => scores[`${technology.id}-${criterion.id}`]?.score || 0)
+            .filter((value) => value > 0);
+
+          if (scoredValues.length === 0) return null;
+          return scoredValues.reduce((sum, value) => sum + value, 0) / scoredValues.length;
+        })(),
       }));
     }
     return progress;
@@ -137,10 +158,10 @@ export default function ComparisonPage() {
           <p className="page-subtitle">{comparison.useCaseDescription || 'Score each criterion per technology and capture the rationale behind every decision.'}</p>
         </div>
         <div className="hero-actions wrap">
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving} title="Persist all scores and weights to the database">
             {saving ? 'Saving...' : 'Save changes'}
           </button>
-          <button className="btn btn-secondary" onClick={() => navigate(`/comparison/${id}/results`)}>
+          <button className="btn btn-secondary" onClick={() => navigate(`/comparison/${id}/results`)} title="Calculate and display the final weighted recommendation">
             View results
           </button>
         </div>
@@ -151,6 +172,10 @@ export default function ComparisonPage() {
           <div className="card sidebar-card">
             <div className="sidebar-title">Categories</div>
             <div className="sidebar-menu">
+              <button className={`sidebar-link ${activeCategory === null ? 'active' : ''}`} onClick={() => setActiveCategory(null)}>
+                <div className="sidebar-link-title">All categories</div>
+                <div className="muted small-text">Show every category in a single stacked view.</div>
+              </button>
               {categories.map((category) => (
                 <button
                   key={category.id}
@@ -160,8 +185,18 @@ export default function ComparisonPage() {
                   <div className="sidebar-link-title">{category.name}</div>
                   <div className="sidebar-progress-list">
                     {categoryProgress[category.id]?.map((item) => (
-                      <span className="mini-progress-pill" key={item.technologyId}>
+                      <span
+                        className="mini-progress-pill"
+                        key={item.technologyId}
+                        title="Number of criteria scored out of total for this technology"
+                      >
                         {item.technologyName}: {item.scored}/{item.total}
+                        {item.avgScore !== null && (
+                          <>
+                            {' '}
+                            (<span className={`score-inline sidebar-score-inline ${getScoreClass(item.avgScore)}`}>avg {item.avgScore.toFixed(2)}</span>)
+                          </>
+                        )}
                       </span>
                     ))}
                   </div>
@@ -179,6 +214,7 @@ export default function ComparisonPage() {
                 min="0"
                 max="10"
                 step="0.5"
+                title="Adjust how much this category influences the final weighted score"
                 value={weights[activeCategory] ?? 1}
                 onChange={(event) =>
                   setWeights((prev) => ({
@@ -192,11 +228,11 @@ export default function ComparisonPage() {
         </aside>
 
         <main className="main-content">
-          {activeCat && (
-            <section className="card table-card">
+          {visibleCategories.map((category) => (
+            <section className="card table-card" key={category.id}>
               <div className="section-heading-row">
                 <div>
-                  <h3>{activeCat.name}</h3>
+                  <h3>{category.name}</h3>
                   <p className="muted">Use the option pills to score each technology and add brief justification where useful.</p>
                 </div>
               </div>
@@ -212,7 +248,7 @@ export default function ComparisonPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {activeCat.criteria.map((criterion) => (
+                    {category.criteria.map((criterion) => (
                       <tr key={criterion.id}>
                         <td>
                           <div className="criterion-title">{criterion.name}</div>
@@ -230,7 +266,7 @@ export default function ComparisonPage() {
                                     type="button"
                                     className={`score-option score-${score} ${currentScore === score ? 'selected' : ''}`}
                                     onClick={() => setScore(technology.id, criterion.id, score)}
-                                    title={SCORE_LABELS[score]}
+                                    title={`${SCORE_LABELS[score]} — Rate this criterion for the selected technology`}
                                   >
                                     <span>{score}</span>
                                     <small>{SCORE_LABELS[score]}</small>
@@ -252,7 +288,7 @@ export default function ComparisonPage() {
                 </table>
               </div>
             </section>
-          )}
+          ))}
         </main>
       </div>
     </div>

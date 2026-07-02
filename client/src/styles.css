@@ -239,7 +239,7 @@ button {
 .container {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 2rem 1.5rem 3rem;
+  padding: 2.5rem 1.5rem 3rem;
 }
 
 .page-stack {
@@ -476,6 +476,10 @@ textarea:focus {
   color: var(--text);
 }
 
+.sidebar-score-inline {
+  font-size: 0.84rem;
+}
+
 .pill-outline {
   background: transparent;
   border: 1px solid var(--border-strong);
@@ -485,6 +489,15 @@ textarea:focus {
 .pill-success {
   background: var(--success-soft);
   color: var(--success);
+}
+
+.comparison-status-pill {
+  cursor: pointer;
+  appearance: none;
+}
+
+.comparison-status-pill.pill-outline {
+  border: 1px solid var(--border-strong);
 }
 
 .pill-warning {
@@ -740,6 +753,23 @@ tr:last-child td {
   justify-content: space-between;
 }
 
+.technology-edit-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.technology-edit-fields textarea {
+  min-height: 4.5rem;
+}
+
+.status-select-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
 .question-group-header {
   justify-content: space-between;
   flex-wrap: wrap;
@@ -757,6 +787,9 @@ tr:last-child td {
 .question-category-heading {
   flex: 1;
   min-width: 240px;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
 }
 
 .question-group-toolbar {
@@ -764,9 +797,15 @@ tr:last-child td {
   top: 5.5rem;
   z-index: 5;
   display: flex;
-  justify-content: flex-start;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding: 0.25rem 0 0.85rem;
   background: linear-gradient(180deg, rgba(249, 248, 245, 0.98), rgba(249, 248, 245, 0.9));
+}
+
+.toolbar-category-label {
+  font-weight: 800;
 }
 
 .question-framework-table td:last-child,
@@ -861,6 +900,30 @@ tr:last-child td {
   font-weight: 800;
 }
 
+.results-category-row {
+  cursor: pointer;
+}
+
+.results-category-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+
+.results-detail-row td {
+  background: rgba(24, 50, 52, 0.03);
+}
+
+.results-detail-label {
+  padding-left: 1.5rem;
+  display: inline-block;
+}
+
 .summary-row td {
   border-top: 2px solid rgba(1, 105, 111, 0.16);
   font-weight: 800;
@@ -873,6 +936,12 @@ tr:last-child td {
 .winner-score-block {
   flex-direction: column;
   align-items: flex-end;
+}
+
+.ref-answers-header {
+  position: sticky;
+  top: 4.5rem;
+  z-index: 20;
 }
 
 .login-page {

@@ -20,6 +20,10 @@ router.post('/login', authMiddleware, async (req: AuthRequest, res: Response) =>
       .query('SELECT * FROM AppUsers WHERE entraObjectId = @oid');
 
     if (existing.recordset.length > 0) {
+      if (existing.recordset[0].status === 'blocked') {
+        res.status(403).json({ error: 'Account is blocked. Contact an administrator.' });
+        return;
+      }
       res.json(existing.recordset[0]);
       return;
     }
@@ -30,6 +34,11 @@ router.post('/login', authMiddleware, async (req: AuthRequest, res: Response) =>
       .query('SELECT * FROM AppUsers WHERE email = @email');
 
     if (invitedUser.recordset.length > 0 && !invitedUser.recordset[0].entraObjectId) {
+      if (invitedUser.recordset[0].status === 'blocked') {
+        res.status(403).json({ error: 'Account is blocked. Contact an administrator.' });
+        return;
+      }
+
       const linkedUser = await pool
         .request()
         .input('id', sql.Int, invitedUser.recordset[0].id)

@@ -8,6 +8,7 @@ interface User {
   email: string;
   displayName: string;
   role: string;
+  status: 'active' | 'blocked';
   entraObjectId?: string | null;
 }
 
@@ -81,6 +82,7 @@ export default function AdminPage() {
   const [technologies, setTechnologies] = useState<Technology[]>([]);
   const [newTechName, setNewTechName] = useState('');
   const [newTechDesc, setNewTechDesc] = useState('');
+  const [editingTech, setEditingTech] = useState<Record<number, { name: string; description: string }>>({});
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [defaultWeights, setDefaultWeights] = useState<Record<number, number>>({});
@@ -117,6 +119,17 @@ export default function AdminPage() {
     ]);
 
     setTechnologies(techs);
+    setEditingTech(
+      Object.fromEntries(
+        techs.map((technology) => [
+          technology.id,
+          {
+            name: technology.name,
+            description: technology.description || '',
+          },
+        ])
+      )
+    );
     setCategories(questionCategories);
     setDefaultWeights(Object.fromEntries(weights.map((item) => [item.categoryId, item.weight])));
   };
@@ -140,6 +153,11 @@ export default function AdminPage() {
 
   const handleRoleChange = async (userId: number, role: string) => {
     await usersApi.updateRole(userId, role);
+    loadUsers();
+  };
+
+  const handleStatusChange = async (userId: number, status: User['status']) => {
+    await usersApi.updateStatus(userId, status);
     loadUsers();
   };
 
@@ -184,6 +202,16 @@ export default function AdminPage() {
       setRefAnswers({});
     }
     loadBaseData();
+  };
+
+  const handleSaveTech = async (technologyId: number) => {
+    const draft = editingTech[technologyId];
+    if (!draft?.name.trim()) return;
+    await technologiesApi.update(technologyId, {
+      name: draft.name.trim(),
+      description: draft.description.trim() || undefined,
+    });
+    await loadBaseData();
   };
 
   const handleSaveRefAnswers = async () => {
@@ -346,7 +374,7 @@ export default function AdminPage() {
       </div>
 
       {activeTab === 'users' && (
-        <div className="page-stack">
+        <div className="status-select-stack">
           <section className="card form-card">
             <div className="section-heading-row">
               <div>
@@ -400,7 +428,13 @@ export default function AdminPage() {
                         <td>{user.displayName}</td>
                         <td>{user.email}</td>
                         <td>
-                          <span className={`pill ${isPending ? 'pill-warning' : 'pill-success'}`}>{isPending ? 'Pending' : 'Active'}</span>
+                          <div className="page-stack">
+                            <select value={user.status || 'active'} onChange={(event) => handleStatusChange(user.id, event.target.value as User['status'])}>
+                              <option value="active">Active</option>
+                              <option value="blocked">Blocked</option>
+                            </select>
+                            {isPending && <span className="muted small-text">Invite pending</span>}
+                          </div>
                         </td>
                         <td>
                           <select value={user.role} onChange={(event) => handleRoleChange(user.id, event.target.value)}>
@@ -437,13 +471,42 @@ export default function AdminPage() {
           <div className="admin-list">
             {technologies.map((technology) => (
               <div className="admin-list-item" key={technology.id}>
-                <div>
-                  <strong>{technology.name}</strong>
-                  <p className="muted">{technology.description || 'No description yet.'}</p>
+                <div className="technology-edit-fields">
+                  <input
+                    placeholder="Technology name"
+                    value={editingTech[technology.id]?.name ?? technology.name}
+                    onChange={(event) =>
+                      setEditingTech((prev) => ({
+                        ...prev,
+                        [technology.id]: {
+                          name: event.target.value,
+                          description: prev[technology.id]?.description ?? technology.description ?? '',
+                        },
+                      }))
+                    }
+                  />
+                  <textarea
+                    placeholder="Description"
+                    value={editingTech[technology.id]?.description ?? technology.description ?? ''}
+                    onChange={(event) =>
+                      setEditingTech((prev) => ({
+                        ...prev,
+                        [technology.id]: {
+                          name: prev[technology.id]?.name ?? technology.name,
+                          description: event.target.value,
+                        },
+                      }))
+                    }
+                  />
                 </div>
-                <button className="btn btn-danger btn-sm" onClick={() => handleDeleteTech(technology.id)}>
-                  Delete
-                </button>
+                <div className="icon-button-row">
+                  <button className="btn btn-secondary btn-sm" onClick={() => handleSaveTech(technology.id)}>
+                    Save
+                  </button>
+                  <button className="btn btn-danger btn-sm" onClick={() => handleDeleteTech(technology.id)}>
+                    Delete
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -477,7 +540,7 @@ export default function AdminPage() {
               </div>
             ) : (
               <section className="page-stack">
-                <div className="section-heading-row card compact-card">
+                <div className="section-heading-row card compact-card ref-answers-header">
                   <div>
                     <h3>Reference answers: {technologies.find((item) => item.id === selectedTech)?.name}</h3>
                     <p className="muted">These answers seed new comparisons for the selected technology.</p>
@@ -616,6 +679,7 @@ export default function AdminPage() {
               <section className="card table-card" key={category.id}>
                 <div className="question-group-header">
                   <div className="question-category-heading">
+                    <label className="label">Category:</label>
                     <input
                       value={editingCategories[category.id] ?? category.name}
                       onChange={(event) => setEditingCategories((prev) => ({ ...prev, [category.id]: event.target.value }))}
@@ -638,6 +702,7 @@ export default function AdminPage() {
                 </div>
 
                 <div className="question-group-toolbar">
+                  <span className="toolbar-category-label">{category.name}</span>
                   <button className="btn btn-secondary btn-sm" onClick={() => handleAddCriterionDraft(category.id)}>
                     + Add Criterion
                   </button>
