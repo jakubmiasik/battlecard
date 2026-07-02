@@ -35,13 +35,11 @@ async function fetchApi(url: string, options: RequestInit = {}): Promise<any> {
   return response.json();
 }
 
-// Auth
 export const authApi = {
   login: () => fetchApi('/api/auth/login', { method: 'POST' }),
   me: () => fetchApi('/api/auth/me'),
 };
 
-// Users
 export const usersApi = {
   list: () => fetchApi('/api/users'),
   updateRole: (id: number, role: string) =>
@@ -49,7 +47,6 @@ export const usersApi = {
   delete: (id: number) => fetchApi(`/api/users/${id}`, { method: 'DELETE' }),
 };
 
-// Technologies
 export const technologiesApi = {
   list: () => fetchApi('/api/technologies'),
   create: (data: { name: string; description?: string }) =>
@@ -59,25 +56,44 @@ export const technologiesApi = {
   delete: (id: number) => fetchApi(`/api/technologies/${id}`, { method: 'DELETE' }),
 };
 
-// Criteria
 export const criteriaApi = {
   list: () => fetchApi('/api/criteria'),
+  getDefaultWeights: () => fetchApi('/api/criteria/default-weights'),
+  updateDefaultWeights: (weights: { categoryId: number; weight: number }[]) =>
+    fetchApi('/api/criteria/default-weights', { method: 'PUT', body: JSON.stringify({ weights }) }),
 };
 
-// Reference Answers
+export const questionsApi = {
+  list: () => fetchApi('/api/questions'),
+  createCategory: (data: { name: string; sortOrder?: number }) =>
+    fetchApi('/api/questions/categories', { method: 'POST', body: JSON.stringify(data) }),
+  updateCategory: (id: number, data: { name?: string; sortOrder?: number }) =>
+    fetchApi(`/api/questions/categories/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCategory: (id: number) => fetchApi(`/api/questions/categories/${id}`, { method: 'DELETE' }),
+  createCriterion: (data: { categoryId: number; name: string; definition?: string; sortOrder?: number }) =>
+    fetchApi('/api/questions/criteria', { method: 'POST', body: JSON.stringify(data) }),
+  updateCriterion: (id: number, data: { categoryId?: number; name?: string; definition?: string; sortOrder?: number }) =>
+    fetchApi(`/api/questions/criteria/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCriterion: (id: number) => fetchApi(`/api/questions/criteria/${id}`, { method: 'DELETE' }),
+};
+
 export const referenceAnswersApi = {
   get: (technologyId: number) => fetchApi(`/api/reference-answers/${technologyId}`),
   save: (technologyId: number, answers: { criteriaId: number; score: number; justification: string }[]) =>
     fetchApi(`/api/reference-answers/${technologyId}`, { method: 'POST', body: JSON.stringify({ answers }) }),
 };
 
-// Comparisons
 export const comparisonsApi = {
   list: () => fetchApi('/api/comparisons'),
   get: (id: number) => fetchApi(`/api/comparisons/${id}`),
-  create: (data: { clientName: string; useCaseDescription?: string; technologyIds: number[]; categoryWeights?: { categoryId: number; weight: number }[] }) =>
-    fetchApi('/api/comparisons', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: number, data: { clientName: string; useCaseDescription?: string; status?: string }) =>
+  create: (data: {
+    clientName?: string | null;
+    comparisonType?: 'client' | 'simple';
+    useCaseDescription?: string;
+    technologyIds: number[];
+    categoryWeights?: { categoryId: number; weight: number }[];
+  }) => fetchApi('/api/comparisons', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: { clientName?: string | null; comparisonType?: 'client' | 'simple'; useCaseDescription?: string; status?: string }) =>
     fetchApi(`/api/comparisons/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   saveScores: (id: number, scores: { technologyId: number; criteriaId: number; score: number; justification?: string }[]) =>
     fetchApi(`/api/comparisons/${id}/scores`, { method: 'PUT', body: JSON.stringify({ scores }) }),

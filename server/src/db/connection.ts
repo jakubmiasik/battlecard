@@ -22,7 +22,6 @@ export async function getPool(): Promise<sql.ConnectionPool> {
 
 export async function initDb(): Promise<void> {
   const p = await getPool();
-  // Run migration to ensure tables exist
   await runMigrations(p);
 }
 
@@ -90,13 +89,36 @@ async function runMigrations(pool: sql.ConnectionPool): Promise<void> {
     IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Comparisons')
     CREATE TABLE Comparisons (
       id INT IDENTITY(1,1) PRIMARY KEY,
-      clientName NVARCHAR(256) NOT NULL,
+      clientName NVARCHAR(256) NULL,
       useCaseDescription NVARCHAR(MAX),
+      comparisonType NVARCHAR(20) NOT NULL DEFAULT 'client',
       createdBy INT NOT NULL,
       status NVARCHAR(20) DEFAULT 'draft',
       createdAt DATETIME2 DEFAULT GETUTCDATE(),
       updatedAt DATETIME2 DEFAULT GETUTCDATE()
     );
+  `);
+
+  await pool.request().query(`
+    IF EXISTS (
+      SELECT 1 FROM sys.columns 
+      WHERE Name = N'clientName' AND Object_ID = Object_ID(N'Comparisons') AND is_nullable = 0
+    )
+    BEGIN
+      ALTER TABLE Comparisons ALTER COLUMN clientName NVARCHAR(256) NULL;
+    END
+
+    IF NOT EXISTS (
+      SELECT 1 FROM sys.columns 
+      WHERE Name = N'comparisonType' AND Object_ID = Object_ID(N'Comparisons')
+    )
+    BEGIN
+      ALTER TABLE Comparisons ADD comparisonType NVARCHAR(20) NOT NULL CONSTRAINT DF_Comparisons_comparisonType DEFAULT 'client';
+    END
+
+    UPDATE Comparisons
+    SET comparisonType = CASE WHEN clientName IS NULL OR LTRIM(RTRIM(clientName)) = '' THEN 'simple' ELSE 'client' END
+    WHERE comparisonType IS NULL OR comparisonType = '';
   `);
 
   await pool.request().query(`
@@ -121,6 +143,15 @@ async function runMigrations(pool: sql.ConnectionPool): Promise<void> {
   `);
 
   await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'DefaultCategoryWeights')
+    CREATE TABLE DefaultCategoryWeights (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      categoryId INT NOT NULL UNIQUE FOREIGN KEY REFERENCES Categories(id),
+      weight DECIMAL(5,2) NOT NULL DEFAULT 1.0
+    );
+  `);
+
+  await pool.request().query(`
     IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'ComparisonScores')
     CREATE TABLE ComparisonScores (
       id INT IDENTITY(1,1) PRIMARY KEY,
@@ -135,11 +166,19 @@ async function runMigrations(pool: sql.ConnectionPool): Promise<void> {
     );
   `);
 
-  // Seed categories and criteria if not present
   const catCount = await pool.request().query('SELECT COUNT(*) as cnt FROM Categories');
   if (catCount.recordset[0].cnt === 0) {
     await seedCategoriesAndCriteria(pool);
   }
+
+  await pool.request().query(`
+    INSERT INTO DefaultCategoryWeights (categoryId, weight)
+    SELECT c.id, 1.0
+    FROM Categories c
+    WHERE NOT EXISTS (
+      SELECT 1 FROM DefaultCategoryWeights dcw WHERE dcw.categoryId = c.id
+    );
+  `);
 }
 
 async function seedCategoriesAndCriteria(pool: sql.ConnectionPool): Promise<void> {
@@ -260,16 +299,16 @@ async function seedCategoriesAndCriteria(pool: sql.ConnectionPool): Promise<void
     const categoryId = catResult.recordset[0].id;
 
     for (let j = 0; j < criteria.length; j++) {
-      const c = criteria[j];
+      const criterion = criteria[j];
       await pool
         .request()
         .input('categoryId', sql.Int, categoryId)
-        .input('name', sql.NVarChar, c.name)
-        .input('definition', sql.NVarChar, c.definition)
+        .input('name', sql.NVarChar, criterion.name)
+        .input('definition', sql.NVarChar, criterion.definition)
         .input('sortOrder', sql.Int, j)
-        .query('INSERT INTO Criteria (categoryId, name, definition, sortOrder) VALUES (@categoryId, @name, @definition, @sortOrder)');
+        .query(
+          'INSERT INTO Criteria (categoryId, name, definition, sortOrder) VALUES (@categoryId, @name, @definition, @sortOrder)'
+        );
     }
   }
 }
-
-export { sql };

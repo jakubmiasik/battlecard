@@ -10,6 +10,7 @@ import usersRoutes from './routes/users.js';
 import technologiesRoutes from './routes/technologies.js';
 import comparisonsRoutes from './routes/comparisons.js';
 import criteriaRoutes from './routes/criteria.js';
+import questionsRoutes from './routes/questions.js';
 import referenceAnswersRoutes from './routes/referenceAnswers.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,22 +22,18 @@ const PORT = process.env.PORT || process.env.WEBSITES_PORT || 8080;
 app.use(cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
 app.use(express.json());
 
-// Public routes
 app.use('/api/auth', authRoutes);
-
-// Protected routes
 app.use('/api/users', authMiddleware, usersRoutes);
 app.use('/api/technologies', authMiddleware, technologiesRoutes);
 app.use('/api/comparisons', authMiddleware, comparisonsRoutes);
 app.use('/api/criteria', authMiddleware, criteriaRoutes);
+app.use('/api/questions', authMiddleware, questionsRoutes);
 app.use('/api/reference-answers', authMiddleware, referenceAnswersRoutes);
 
-// Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Serve React build in production
 const clientBuildPath = path.join(__dirname, 'client', 'dist');
 app.use(express.static(clientBuildPath));
 app.get('*', (_req, res) => {

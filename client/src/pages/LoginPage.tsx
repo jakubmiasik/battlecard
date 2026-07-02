@@ -1,6 +1,6 @@
-import { useAuth } from '../contexts/AuthContext';
-import { useIsAuthenticated } from '@azure/msal-react';
 import { Navigate } from 'react-router-dom';
+import { useIsAuthenticated } from '@azure/msal-react';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -10,16 +10,28 @@ export default function LoginPage() {
 
   return (
     <div className="login-page">
-      <h1>⚔️ Technology Battlecard</h1>
-      <p>Compare technologies with structured scoring and weighted criteria</p>
-      <div className="login-card">
-        <h2>Welcome</h2>
-        <p style={{ marginBottom: 24, color: '#605e5c' }}>
-          Sign in with your organization account to get started.
-        </p>
-        <button className="btn btn-primary" onClick={login} style={{ fontSize: 16, padding: '12px 32px' }}>
-          Sign in with Microsoft
-        </button>
+      <div className="login-shell">
+        <section className="login-copy">
+          <span className="eyebrow">Technology Battlecard</span>
+          <h1>Structured technology decisions, designed for fast alignment.</h1>
+          <p>
+            Compare platforms with consistent criteria, reusable reference answers, category weighting, and presentation-ready results.
+          </p>
+          <div className="tag-row">
+            <span className="tag">Earthy teal UI</span>
+            <span className="tag">Weighted scoring</span>
+            <span className="tag">Admin-managed questions</span>
+          </div>
+        </section>
+
+        <section className="login-card card">
+          <div className="brand-mark large">TB</div>
+          <h2>Welcome back</h2>
+          <p className="muted">Sign in with your Microsoft account to access saved comparisons and admin tools.</p>
+          <button className="btn btn-primary btn-block" onClick={login}>
+            Sign in with Microsoft
+          </button>
+        </section>
       </div>
     </div>
   );

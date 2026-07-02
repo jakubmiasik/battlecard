@@ -1,80 +1,122 @@
 import { Router, Response } from 'express';
+import sql from 'mssql';
 import { getPool } from '../db/connection.js';
 import { AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 
-// List comparisons for current user
+type ComparisonPayload = {
+  clientName?: string | null;
+  comparisonType?: 'client' | 'simple';
+  useCaseDescription?: string;
+  technologyIds?: number[];
+  categoryWeights?: { categoryId: number; weight: number }[];
+};
+
+async function getCurrentUserId(req: AuthRequest): Promise<number | null> {
+  const pool = await getPool();
+  const userResult = await pool
+    .request()
+    .input('oid', req.user!.oid)
+    .query('SELECT id FROM AppUsers WHERE entraObjectId = @oid');
+
+  return userResult.recordset[0]?.id ?? null;
+}
+
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const pool = await getPool();
-    const userResult = await pool
-      .request()
-      .input('oid', req.user!.oid)
-      .query('SELECT id FROM AppUsers WHERE entraObjectId = @oid');
-    const userId = userResult.recordset[0]?.id;
+    const userId = await getCurrentUserId(req);
 
-    const result = await pool
-      .request()
-      .input('userId', userId)
-      .query(
-        `SELECT c.*, 
-          (SELECT STRING_AGG(t.name, ', ') FROM ComparisonTechnologies ct 
-           JOIN Technologies t ON ct.technologyId = t.id WHERE ct.comparisonId = c.id) as technologyNames
-         FROM Comparisons c WHERE c.createdBy = @userId ORDER BY c.updatedAt DESC`
-      );
-    res.json(result.recordset);
-  } catch (err) {
+    const comparisonsResult = await pool.request().input('userId', sql.Int, userId).query(`
+      SELECT c.id, c.clientName, c.useCaseDescription, c.comparisonType, c.status, c.createdAt, c.updatedAt,
+             STRING_AGG(t.name, ', ') WITHIN GROUP (ORDER BY t.name) as technologyNames
+      FROM Comparisons c
+      LEFT JOIN ComparisonTechnologies ct ON ct.comparisonId = c.id
+      LEFT JOIN Technologies t ON t.id = ct.technologyId
+      WHERE c.createdBy = @userId
+      GROUP BY c.id, c.clientName, c.useCaseDescription, c.comparisonType, c.status, c.createdAt, c.updatedAt
+      ORDER BY c.updatedAt DESC
+    `);
+
+    const progressResult = await pool.request().input('userId', sql.Int, userId).query(`
+      WITH TotalCriteria AS (
+        SELECT COUNT(*) as totalCriteria FROM Criteria
+      )
+      SELECT c.id as comparisonId,
+             t.id as technologyId,
+             t.name as technologyName,
+             COUNT(cs.id) as scoredCount,
+             tc.totalCriteria
+      FROM Comparisons c
+      JOIN ComparisonTechnologies ct ON ct.comparisonId = c.id
+      JOIN Technologies t ON t.id = ct.technologyId
+      CROSS JOIN TotalCriteria tc
+      LEFT JOIN ComparisonScores cs ON cs.comparisonId = c.id AND cs.technologyId = t.id
+      WHERE c.createdBy = @userId
+      GROUP BY c.id, t.id, t.name, tc.totalCriteria
+    `);
+
+    const progressByComparison = new Map<number, unknown[]>();
+    for (const row of progressResult.recordset) {
+      const current = progressByComparison.get(row.comparisonId) ?? [];
+      current.push({
+        technologyId: row.technologyId,
+        technologyName: row.technologyName,
+        scoredCount: row.scoredCount,
+        totalCriteria: row.totalCriteria,
+      });
+      progressByComparison.set(row.comparisonId, current);
+    }
+
+    res.json(
+      comparisonsResult.recordset.map((comparison) => ({
+        ...comparison,
+        technologyProgress: progressByComparison.get(comparison.id) ?? [],
+      }))
+    );
+  } catch (error) {
+    console.error('List comparisons error:', error);
     res.status(500).json({ error: 'Failed to list comparisons' });
   }
 });
 
-// Get single comparison with all details
 router.get('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const pool = await getPool();
-    const compId = parseInt(req.params.id);
+    const compId = parseInt(req.params.id, 10);
 
-    const comparison = await pool
-      .request()
-      .input('id', compId)
-      .query('SELECT * FROM Comparisons WHERE id = @id');
+    const comparison = await pool.request().input('id', sql.Int, compId).query('SELECT * FROM Comparisons WHERE id = @id');
 
     if (comparison.recordset.length === 0) {
       res.status(404).json({ error: 'Comparison not found' });
       return;
     }
 
-    const technologies = await pool
-      .request()
-      .input('compId', compId)
-      .query(
-        `SELECT t.* FROM ComparisonTechnologies ct 
-         JOIN Technologies t ON ct.technologyId = t.id 
-         WHERE ct.comparisonId = @compId`
-      );
+    const technologies = await pool.request().input('compId', sql.Int, compId).query(`
+      SELECT t.*
+      FROM ComparisonTechnologies ct
+      JOIN Technologies t ON ct.technologyId = t.id
+      WHERE ct.comparisonId = @compId
+      ORDER BY t.name
+    `);
 
-    const weights = await pool
-      .request()
-      .input('compId', compId)
-      .query(
-        `SELECT cw.*, cat.name as categoryName 
-         FROM CategoryWeights cw 
-         JOIN Categories cat ON cw.categoryId = cat.id 
-         WHERE cw.comparisonId = @compId`
-      );
+    const weights = await pool.request().input('compId', sql.Int, compId).query(`
+      SELECT cw.id, cw.comparisonId, cw.categoryId, CAST(cw.weight AS FLOAT) as weight, cat.name as categoryName
+      FROM CategoryWeights cw
+      JOIN Categories cat ON cw.categoryId = cat.id
+      WHERE cw.comparisonId = @compId
+      ORDER BY cat.sortOrder, cat.id
+    `);
 
-    const scores = await pool
-      .request()
-      .input('compId', compId)
-      .query(
-        `SELECT cs.*, c.name as criteriaName, c.definition, cat.name as categoryName, cat.id as categoryId
-         FROM ComparisonScores cs
-         JOIN Criteria c ON cs.criteriaId = c.id
-         JOIN Categories cat ON c.categoryId = cat.id
-         WHERE cs.comparisonId = @compId
-         ORDER BY cat.sortOrder, c.sortOrder`
-      );
+    const scores = await pool.request().input('compId', sql.Int, compId).query(`
+      SELECT cs.*, c.name as criteriaName, c.definition, cat.name as categoryName, cat.id as categoryId
+      FROM ComparisonScores cs
+      JOIN Criteria c ON cs.criteriaId = c.id
+      JOIN Categories cat ON c.categoryId = cat.id
+      WHERE cs.comparisonId = @compId
+      ORDER BY cat.sortOrder, c.sortOrder, c.id
+    `);
 
     res.json({
       ...comparison.recordset[0],
@@ -82,261 +124,265 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
       categoryWeights: weights.recordset,
       scores: scores.recordset,
     });
-  } catch (err) {
+  } catch (error) {
+    console.error('Get comparison error:', error);
     res.status(500).json({ error: 'Failed to get comparison' });
   }
 });
 
-// Create comparison
 router.post('/', async (req: AuthRequest, res: Response) => {
   try {
-    const { clientName, useCaseDescription, technologyIds, categoryWeights } = req.body;
+    const { clientName, comparisonType, useCaseDescription, technologyIds, categoryWeights } = req.body as ComparisonPayload;
+    const resolvedType = comparisonType === 'simple' ? 'simple' : 'client';
+    const trimmedClientName = clientName?.trim() || null;
 
-    if (!clientName) {
-      res.status(400).json({ error: 'Client name is required' });
+    if (resolvedType === 'client' && !trimmedClientName) {
+      res.status(400).json({ error: 'Client name is required for client comparisons' });
+      return;
+    }
+
+    if (!technologyIds || !Array.isArray(technologyIds) || technologyIds.length < 2) {
+      res.status(400).json({ error: 'At least two technologies are required' });
       return;
     }
 
     const pool = await getPool();
+    const userId = await getCurrentUserId(req);
 
-    const userResult = await pool
-      .request()
-      .input('oid', req.user!.oid)
-      .query('SELECT id FROM AppUsers WHERE entraObjectId = @oid');
-    const userId = userResult.recordset[0]?.id;
-
-    // Create comparison
     const compResult = await pool
       .request()
-      .input('clientName', clientName)
-      .input('useCaseDescription', useCaseDescription || null)
-      .input('createdBy', userId)
-      .query(
-        'INSERT INTO Comparisons (clientName, useCaseDescription, createdBy) OUTPUT INSERTED.* VALUES (@clientName, @useCaseDescription, @createdBy)'
-      );
+      .input('clientName', sql.NVarChar, resolvedType === 'simple' ? null : trimmedClientName)
+      .input('comparisonType', sql.NVarChar, resolvedType)
+      .input('useCaseDescription', sql.NVarChar, useCaseDescription?.trim() || null)
+      .input('createdBy', sql.Int, userId)
+      .query(`
+        INSERT INTO Comparisons (clientName, comparisonType, useCaseDescription, createdBy)
+        OUTPUT INSERTED.*
+        VALUES (@clientName, @comparisonType, @useCaseDescription, @createdBy)
+      `);
+
     const compId = compResult.recordset[0].id;
 
-    // Add technologies
-    if (technologyIds && Array.isArray(technologyIds)) {
-      for (const techId of technologyIds) {
-        await pool
-          .request()
-          .input('compId', compId)
-          .input('techId', techId)
-          .query('INSERT INTO ComparisonTechnologies (comparisonId, technologyId) VALUES (@compId, @techId)');
-      }
+    for (const techId of technologyIds) {
+      await pool
+        .request()
+        .input('compId', sql.Int, compId)
+        .input('techId', sql.Int, techId)
+        .query('INSERT INTO ComparisonTechnologies (comparisonId, technologyId) VALUES (@compId, @techId)');
     }
 
-    // Add category weights
-    if (categoryWeights && Array.isArray(categoryWeights)) {
-      for (const cw of categoryWeights) {
+    if (Array.isArray(categoryWeights) && categoryWeights.length > 0) {
+      for (const item of categoryWeights) {
         await pool
           .request()
-          .input('compId', compId)
-          .input('categoryId', cw.categoryId)
-          .input('weight', cw.weight)
+          .input('compId', sql.Int, compId)
+          .input('categoryId', sql.Int, item.categoryId)
+          .input('weight', sql.Decimal(5, 2), item.weight)
           .query('INSERT INTO CategoryWeights (comparisonId, categoryId, weight) VALUES (@compId, @categoryId, @weight)');
       }
     }
 
-    // Pre-populate scores from reference answers
-    if (technologyIds && Array.isArray(technologyIds)) {
-      for (const techId of technologyIds) {
-        await pool
-          .request()
-          .input('compId', compId)
-          .input('techId', techId)
-          .query(
-            `INSERT INTO ComparisonScores (comparisonId, technologyId, criteriaId, score, justification, updatedBy)
-             SELECT @compId, @techId, ra.criteriaId, ra.score, ra.justification, ra.updatedBy
-             FROM ReferenceAnswers ra WHERE ra.technologyId = @techId`
-          );
-      }
+    await pool.request().input('compId', sql.Int, compId).query(`
+      INSERT INTO CategoryWeights (comparisonId, categoryId, weight)
+      SELECT @compId, c.id, COALESCE(dcw.weight, 1.0)
+      FROM Categories c
+      LEFT JOIN DefaultCategoryWeights dcw ON dcw.categoryId = c.id
+      WHERE NOT EXISTS (
+        SELECT 1 FROM CategoryWeights cw WHERE cw.comparisonId = @compId AND cw.categoryId = c.id
+      );
+    `);
+
+    for (const techId of technologyIds) {
+      await pool
+        .request()
+        .input('compId', sql.Int, compId)
+        .input('techId', sql.Int, techId)
+        .query(`
+          INSERT INTO ComparisonScores (comparisonId, technologyId, criteriaId, score, justification, updatedBy)
+          SELECT @compId, @techId, ra.criteriaId, ra.score, ra.justification, ra.updatedBy
+          FROM ReferenceAnswers ra
+          WHERE ra.technologyId = @techId
+        `);
     }
 
     res.status(201).json(compResult.recordset[0]);
-  } catch (err) {
-    console.error('Create comparison error:', err);
+  } catch (error) {
+    console.error('Create comparison error:', error);
     res.status(500).json({ error: 'Failed to create comparison' });
   }
 });
 
-// Update comparison metadata
 router.put('/:id', async (req: AuthRequest, res: Response) => {
   try {
-    const { clientName, useCaseDescription, status } = req.body;
+    const comparisonId = parseInt(req.params.id, 10);
+    const { clientName, comparisonType, useCaseDescription, status } = req.body as ComparisonPayload & { status?: string };
     const pool = await getPool();
 
-    const result = await pool
-      .request()
-      .input('id', parseInt(req.params.id))
-      .input('clientName', clientName)
-      .input('useCaseDescription', useCaseDescription || null)
-      .input('status', status || 'draft')
-      .query(
-        `UPDATE Comparisons SET clientName = @clientName, useCaseDescription = @useCaseDescription, 
-         status = @status, updatedAt = GETUTCDATE() OUTPUT INSERTED.* WHERE id = @id`
-      );
-
-    if (result.recordset.length === 0) {
+    const current = await pool.request().input('id', sql.Int, comparisonId).query('SELECT * FROM Comparisons WHERE id = @id');
+    if (current.recordset.length === 0) {
       res.status(404).json({ error: 'Comparison not found' });
       return;
     }
+
+    const existing = current.recordset[0];
+    const resolvedType = comparisonType ?? existing.comparisonType ?? 'client';
+    const nextClientName = resolvedType === 'simple' ? null : (clientName?.trim() || existing.clientName || null);
+
+    if (resolvedType === 'client' && !nextClientName) {
+      res.status(400).json({ error: 'Client name is required for client comparisons' });
+      return;
+    }
+
+    const result = await pool
+      .request()
+      .input('id', sql.Int, comparisonId)
+      .input('clientName', sql.NVarChar, nextClientName)
+      .input('comparisonType', sql.NVarChar, resolvedType)
+      .input('useCaseDescription', sql.NVarChar, useCaseDescription === undefined ? existing.useCaseDescription : useCaseDescription.trim() || null)
+      .input('status', sql.NVarChar, status || existing.status || 'draft')
+      .query(`
+        UPDATE Comparisons
+        SET clientName = @clientName,
+            comparisonType = @comparisonType,
+            useCaseDescription = @useCaseDescription,
+            status = @status,
+            updatedAt = GETUTCDATE()
+        OUTPUT INSERTED.*
+        WHERE id = @id
+      `);
+
     res.json(result.recordset[0]);
-  } catch (err) {
+  } catch (error) {
+    console.error('Update comparison error:', error);
     res.status(500).json({ error: 'Failed to update comparison' });
   }
 });
 
-// Save scores for a comparison
 router.put('/:id/scores', async (req: AuthRequest, res: Response) => {
   try {
-    const compId = parseInt(req.params.id);
+    const compId = parseInt(req.params.id, 10);
     const { scores } = req.body as {
       scores: { technologyId: number; criteriaId: number; score: number; justification?: string }[];
     };
 
     const pool = await getPool();
+    const userId = await getCurrentUserId(req);
 
-    const userResult = await pool
-      .request()
-      .input('oid', req.user!.oid)
-      .query('SELECT id FROM AppUsers WHERE entraObjectId = @oid');
-    const userId = userResult.recordset[0]?.id;
-
-    for (const s of scores) {
+    for (const item of scores) {
       await pool
         .request()
-        .input('compId', compId)
-        .input('techId', s.technologyId)
-        .input('criteriaId', s.criteriaId)
-        .input('score', s.score)
-        .input('justification', s.justification || null)
-        .input('updatedBy', userId)
-        .query(
-          `MERGE ComparisonScores AS target
-           USING (VALUES (@compId, @techId, @criteriaId)) AS source (comparisonId, technologyId, criteriaId)
-           ON target.comparisonId = source.comparisonId 
-              AND target.technologyId = source.technologyId 
-              AND target.criteriaId = source.criteriaId
-           WHEN MATCHED THEN
-             UPDATE SET score = @score, justification = @justification, updatedBy = @updatedBy, updatedAt = GETUTCDATE()
-           WHEN NOT MATCHED THEN
-             INSERT (comparisonId, technologyId, criteriaId, score, justification, updatedBy)
-             VALUES (@compId, @techId, @criteriaId, @score, @justification, @updatedBy);`
-        );
+        .input('compId', sql.Int, compId)
+        .input('techId', sql.Int, item.technologyId)
+        .input('criteriaId', sql.Int, item.criteriaId)
+        .input('score', sql.Int, item.score)
+        .input('justification', sql.NVarChar, item.justification?.trim() || null)
+        .input('updatedBy', sql.Int, userId)
+        .query(`
+          MERGE ComparisonScores AS target
+          USING (VALUES (@compId, @techId, @criteriaId)) AS source (comparisonId, technologyId, criteriaId)
+          ON target.comparisonId = source.comparisonId
+             AND target.technologyId = source.technologyId
+             AND target.criteriaId = source.criteriaId
+          WHEN MATCHED THEN
+            UPDATE SET score = @score, justification = @justification, updatedBy = @updatedBy, updatedAt = GETUTCDATE()
+          WHEN NOT MATCHED THEN
+            INSERT (comparisonId, technologyId, criteriaId, score, justification, updatedBy)
+            VALUES (@compId, @techId, @criteriaId, @score, @justification, @updatedBy);
+        `);
     }
 
     res.json({ success: true });
-  } catch (err) {
-    console.error('Save scores error:', err);
+  } catch (error) {
+    console.error('Save scores error:', error);
     res.status(500).json({ error: 'Failed to save scores' });
   }
 });
 
-// Save category weights for a comparison
 router.put('/:id/weights', async (req: AuthRequest, res: Response) => {
   try {
-    const compId = parseInt(req.params.id);
-    const { weights } = req.body as {
-      weights: { categoryId: number; weight: number }[];
-    };
-
+    const compId = parseInt(req.params.id, 10);
+    const { weights } = req.body as { weights: { categoryId: number; weight: number }[] };
     const pool = await getPool();
 
-    for (const w of weights) {
+    for (const item of weights) {
       await pool
         .request()
-        .input('compId', compId)
-        .input('categoryId', w.categoryId)
-        .input('weight', w.weight)
-        .query(
-          `MERGE CategoryWeights AS target
-           USING (VALUES (@compId, @categoryId)) AS source (comparisonId, categoryId)
-           ON target.comparisonId = source.comparisonId AND target.categoryId = source.categoryId
-           WHEN MATCHED THEN
-             UPDATE SET weight = @weight
-           WHEN NOT MATCHED THEN
-             INSERT (comparisonId, categoryId, weight) VALUES (@compId, @categoryId, @weight);`
-        );
+        .input('compId', sql.Int, compId)
+        .input('categoryId', sql.Int, item.categoryId)
+        .input('weight', sql.Decimal(5, 2), item.weight)
+        .query(`
+          MERGE CategoryWeights AS target
+          USING (VALUES (@compId, @categoryId)) AS source (comparisonId, categoryId)
+          ON target.comparisonId = source.comparisonId AND target.categoryId = source.categoryId
+          WHEN MATCHED THEN UPDATE SET weight = @weight
+          WHEN NOT MATCHED THEN INSERT (comparisonId, categoryId, weight) VALUES (@compId, @categoryId, @weight);
+        `);
     }
 
     res.json({ success: true });
-  } catch (err) {
+  } catch (error) {
+    console.error('Save weights error:', error);
     res.status(500).json({ error: 'Failed to save weights' });
   }
 });
 
-// Get calculated results for a comparison
 router.get('/:id/results', async (req: AuthRequest, res: Response) => {
   try {
-    const compId = parseInt(req.params.id);
+    const compId = parseInt(req.params.id, 10);
     const pool = await getPool();
 
-    // Get all categories
-    const categories = await pool.request().query('SELECT * FROM Categories ORDER BY sortOrder');
+    const categories = await pool.request().query('SELECT * FROM Categories ORDER BY sortOrder, id');
 
-    // Get weights
-    const weights = await pool
-      .request()
-      .input('compId', compId)
-      .query('SELECT * FROM CategoryWeights WHERE comparisonId = @compId');
+    const weights = await pool.request().input('compId', sql.Int, compId).query(`
+      SELECT categoryId, CAST(weight AS FLOAT) as weight
+      FROM CategoryWeights
+      WHERE comparisonId = @compId
+    `);
 
-    // Get technologies
-    const technologies = await pool
-      .request()
-      .input('compId', compId)
-      .query(
-        `SELECT t.* FROM ComparisonTechnologies ct 
-         JOIN Technologies t ON ct.technologyId = t.id 
-         WHERE ct.comparisonId = @compId`
-      );
+    const technologies = await pool.request().input('compId', sql.Int, compId).query(`
+      SELECT t.*
+      FROM ComparisonTechnologies ct
+      JOIN Technologies t ON ct.technologyId = t.id
+      WHERE ct.comparisonId = @compId
+      ORDER BY t.name
+    `);
 
-    // Get scores with criteria and category info
-    const scores = await pool
-      .request()
-      .input('compId', compId)
-      .query(
-        `SELECT cs.technologyId, cs.criteriaId, cs.score, cs.justification,
-                c.name as criteriaName, c.categoryId, cat.name as categoryName
-         FROM ComparisonScores cs
-         JOIN Criteria c ON cs.criteriaId = c.id
-         JOIN Categories cat ON c.categoryId = cat.id
-         WHERE cs.comparisonId = @compId`
-      );
+    const scores = await pool.request().input('compId', sql.Int, compId).query(`
+      SELECT cs.technologyId, cs.criteriaId, cs.score, cs.justification,
+             c.name as criteriaName, c.categoryId, cat.name as categoryName
+      FROM ComparisonScores cs
+      JOIN Criteria c ON cs.criteriaId = c.id
+      JOIN Categories cat ON c.categoryId = cat.id
+      WHERE cs.comparisonId = @compId
+    `);
 
-    // Get criteria counts per category
     const criteriaCounts = await pool.request().query(
       'SELECT categoryId, COUNT(*) as cnt FROM Criteria GROUP BY categoryId'
     );
 
-    // Calculate weighted scores per technology
     const results = technologies.recordset.map((tech) => {
-      const techScores = scores.recordset.filter((s) => s.technologyId === tech.id);
-
+      const techScores = scores.recordset.filter((score) => score.technologyId === tech.id);
       let totalWeightedScore = 0;
       let totalWeight = 0;
 
-      const categoryResults = categories.recordset.map((cat) => {
-        const catScores = techScores.filter((s) => s.categoryId === cat.id);
-        const weight = weights.recordset.find((w) => w.categoryId === cat.id)?.weight || 1.0;
-        const criteriaCount = criteriaCounts.recordset.find((cc) => cc.categoryId === cat.id)?.cnt || 1;
-
-        const avgScore = catScores.length > 0
-          ? catScores.reduce((sum, s) => sum + s.score, 0) / catScores.length
+      const categoryResults = categories.recordset.map((category) => {
+        const categoryScores = techScores.filter((score) => score.categoryId === category.id);
+        const weight = weights.recordset.find((item) => item.categoryId === category.id)?.weight ?? 1;
+        const criteriaCount = criteriaCounts.recordset.find((item) => item.categoryId === category.id)?.cnt ?? 0;
+        const avgScore = categoryScores.length > 0
+          ? categoryScores.reduce((sum, score) => sum + score.score, 0) / categoryScores.length
           : 0;
 
-        const weightedScore = avgScore * weight;
-        totalWeightedScore += weightedScore;
+        totalWeightedScore += avgScore * weight;
         totalWeight += weight;
 
         return {
-          categoryId: cat.id,
-          categoryName: cat.name,
+          categoryId: category.id,
+          categoryName: category.name,
           weight,
           avgScore: Math.round(avgScore * 100) / 100,
-          weightedScore: Math.round(weightedScore * 100) / 100,
-          scoredCriteria: catScores.length,
+          weightedScore: Math.round(avgScore * weight * 100) / 100,
+          scoredCriteria: categoryScores.length,
           totalCriteria: criteriaCount,
         };
       });
@@ -348,36 +394,28 @@ router.get('/:id/results', async (req: AuthRequest, res: Response) => {
         technologyName: tech.name,
         finalScore: Math.round(finalScore * 100) / 100,
         categoryResults,
-        scores: techScores,
       };
     });
 
-    // Sort by final score descending
     results.sort((a, b) => b.finalScore - a.finalScore);
 
-    // Add recommendation
-    const recommendation = results.length > 0 ? results[0].technologyName : 'No technologies scored';
-
     res.json({
-      recommendation,
+      recommendation: results.length > 0 ? results[0].technologyName : 'No technologies scored',
       results,
     });
-  } catch (err) {
-    console.error('Results error:', err);
+  } catch (error) {
+    console.error('Results error:', error);
     res.status(500).json({ error: 'Failed to calculate results' });
   }
 });
 
-// Delete comparison
 router.delete('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const pool = await getPool();
-    await pool
-      .request()
-      .input('id', parseInt(req.params.id))
-      .query('DELETE FROM Comparisons WHERE id = @id');
+    await pool.request().input('id', sql.Int, parseInt(req.params.id, 10)).query('DELETE FROM Comparisons WHERE id = @id');
     res.json({ success: true });
-  } catch (err) {
+  } catch (error) {
+    console.error('Delete comparison error:', error);
     res.status(500).json({ error: 'Failed to delete comparison' });
   }
 });
