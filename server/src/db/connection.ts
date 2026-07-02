@@ -1,30 +1,18 @@
 import sql from 'mssql';
-import { DefaultAzureCredential } from '@azure/identity';
 
 let pool: sql.ConnectionPool | null = null;
 
 export async function getPool(): Promise<sql.ConnectionPool> {
   if (pool) return pool;
 
-  const server = process.env.DB_SERVER!;
-  const database = process.env.DB_NAME || 'battlecard';
-
-  // Use managed identity for Azure SQL
-  const credential = new DefaultAzureCredential();
-  const tokenResponse = await credential.getToken('https://database.windows.net/.default');
-
   const config: sql.config = {
-    server,
-    database,
+    server: process.env.SQL_SERVER || process.env.DB_SERVER!,
+    database: process.env.SQL_DATABASE || process.env.DB_NAME || 'battlecard',
+    user: process.env.SQL_USER,
+    password: process.env.SQL_PASSWORD,
     options: {
       encrypt: true,
       trustServerCertificate: false,
-    },
-    authentication: {
-      type: 'azure-active-directory-access-token',
-      options: {
-        token: tokenResponse.token,
-      },
     },
   };
 

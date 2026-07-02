@@ -3,3 +3,6 @@ dist/
 .env
 .env.local
 *.js.map
+
+deploy/
+deploy.zip

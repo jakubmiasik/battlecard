@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { initDb } from './db/connection.js';
 import { authMiddleware } from './middleware/auth.js';
 import authRoutes from './routes/auth.js';
@@ -10,10 +12,13 @@ import comparisonsRoutes from './routes/comparisons.js';
 import criteriaRoutes from './routes/criteria.js';
 import referenceAnswersRoutes from './routes/referenceAnswers.js';
 
-const app = express();
-const PORT = process.env.PORT || 3001;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
+const app = express();
+const PORT = process.env.PORT || process.env.WEBSITES_PORT || 8080;
+
+app.use(cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
 app.use(express.json());
 
 // Public routes
@@ -29,6 +34,13 @@ app.use('/api/reference-answers', authMiddleware, referenceAnswersRoutes);
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+// Serve React build in production
+const clientBuildPath = path.join(__dirname, 'client', 'dist');
+app.use(express.static(clientBuildPath));
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(clientBuildPath, 'index.html'));
 });
 
 async function start() {
