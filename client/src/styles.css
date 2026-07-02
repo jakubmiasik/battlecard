@@ -477,7 +477,7 @@ textarea:focus {
   color: var(--text);
 }
 
-.sidebar-score-inline {
+.sidebar-score-inline.score-inline {
   font-size: 0.65rem;
   font-weight: 400;
   padding: 0.2rem 0.55rem;
