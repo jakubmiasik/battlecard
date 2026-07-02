@@ -114,14 +114,13 @@ export default function EditComparisonPage() {
         weight,
       }));
 
-      await Promise.all([
-        comparisonsApi.update(comparisonId, {
-          clientName: clientName.trim() || null,
-          useCaseDescription: useCaseDescription.trim(),
-        }),
-        comparisonsApi.updateTechnologies(comparisonId, selectedTechs),
-        comparisonsApi.saveWeights(comparisonId, weights),
-      ]);
+      // Run sequentially to avoid race conditions
+      await comparisonsApi.update(comparisonId, {
+        clientName: comparison.comparisonType === 'simple' ? undefined : clientName.trim() || null,
+        useCaseDescription: useCaseDescription.trim() || undefined,
+      });
+      await comparisonsApi.updateTechnologies(comparisonId, selectedTechs);
+      await comparisonsApi.saveWeights(comparisonId, weights);
 
       navigate(`/comparison/${comparisonId}`);
     } catch (error) {
@@ -158,6 +157,15 @@ export default function EditComparisonPage() {
         <button className={`tab ${step === 3 ? 'active' : ''}`} onClick={() => setStep(3)}>
           Category weights
         </button>
+        <div style={{ marginLeft: 'auto' }}>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleSave}
+            disabled={saving || selectedTechs.length < 2 || (comparison.comparisonType === 'client' && !clientName.trim())}
+          >
+            {saving ? 'Saving...' : 'Save changes'}
+          </button>
+        </div>
       </div>
 
       {step === 1 && (
@@ -174,14 +182,6 @@ export default function EditComparisonPage() {
               onChange={(event) => setUseCaseDescription(event.target.value)}
               placeholder="Describe goals, constraints, user groups, and delivery expectations."
             />
-          </div>
-          <div className="hero-actions">
-            <button className="btn btn-ghost" onClick={() => navigate(`/comparison/${id}`)}>
-              Cancel
-            </button>
-            <button className="btn btn-primary" onClick={() => setStep(2)} disabled={comparison.comparisonType === 'client' && !clientName.trim()}>
-              Continue to technologies
-            </button>
           </div>
         </section>
       )}
@@ -239,15 +239,6 @@ export default function EditComparisonPage() {
               </button>
             </div>
           </div>
-
-          <div className="hero-actions">
-            <button className="btn btn-ghost" onClick={() => setStep(1)}>
-              Back
-            </button>
-            <button className="btn btn-primary" onClick={() => setStep(3)} disabled={selectedTechs.length < 2}>
-              Continue to weights
-            </button>
-          </div>
         </section>
       )}
 
@@ -283,19 +274,6 @@ export default function EditComparisonPage() {
                 />
               </div>
             ))}
-          </div>
-
-          <div className="hero-actions">
-            <button className="btn btn-ghost" onClick={() => setStep(2)}>
-              Back
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={handleSave}
-              disabled={saving || selectedTechs.length < 2 || (comparison.comparisonType === 'client' && !clientName.trim())}
-            >
-              {saving ? 'Saving...' : 'Save changes'}
-            </button>
           </div>
         </section>
       )}
