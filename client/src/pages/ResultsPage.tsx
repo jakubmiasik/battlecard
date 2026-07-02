@@ -204,7 +204,7 @@ export default function ResultsPage() {
                           <td>
                             <span className="results-detail-label">{criterion.criteriaName}</span>
                           </td>
-                          <td className="muted small-text">Criterion</td>
+                          <td></td>
                           {results.results.map((tech) => {
                             const detail = detailedScoreMap[`${category.categoryId}-${criterion.criteriaId}-${tech.technologyId}`];
                             return (

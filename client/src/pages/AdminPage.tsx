@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Modal from '../components/Modal';
 import { useAuth } from '../contexts/AuthContext';
 import { criteriaApi, questionsApi, referenceAnswersApi, technologiesApi, usersApi } from '../services/api';
 
@@ -95,6 +96,12 @@ export default function AdminPage() {
   const [selectedTech, setSelectedTech] = useState<number | null>(null);
   const [refAnswers, setRefAnswers] = useState<Record<number, { score: number; justification: string }>>({});
   const [refSaving, setRefSaving] = useState(false);
+  const [modal, setModal] = useState<{
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+    variant: 'confirm' | 'info';
+  } | null>(null);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -162,9 +169,16 @@ export default function AdminPage() {
   };
 
   const handleDeleteUser = async (userId: number) => {
-    if (!confirm('Delete this user?')) return;
-    await usersApi.delete(userId);
-    loadUsers();
+    setModal({
+      title: 'Delete user',
+      message: 'Are you sure you want to delete this user?',
+      variant: 'confirm',
+      onConfirm: async () => {
+        setModal(null);
+        await usersApi.delete(userId);
+        await loadUsers();
+      },
+    });
   };
 
   const handleInviteUser = async () => {
@@ -180,7 +194,11 @@ export default function AdminPage() {
       setInviteForm({ email: '', displayName: '', role: 'explorer' });
       await loadUsers();
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to invite user');
+      setModal({
+        title: 'Invite failed',
+        message: error instanceof Error ? error.message : 'Failed to invite user',
+        variant: 'info',
+      });
     } finally {
       setInviteSaving(false);
     }
@@ -195,13 +213,20 @@ export default function AdminPage() {
   };
 
   const handleDeleteTech = async (technologyId: number) => {
-    if (!confirm('Delete this technology? This also removes reference answers.')) return;
-    await technologiesApi.delete(technologyId);
-    if (selectedTech === technologyId) {
-      setSelectedTech(null);
-      setRefAnswers({});
-    }
-    loadBaseData();
+    setModal({
+      title: 'Delete technology',
+      message: 'Delete this technology? This also removes reference answers.',
+      variant: 'confirm',
+      onConfirm: async () => {
+        setModal(null);
+        await technologiesApi.delete(technologyId);
+        if (selectedTech === technologyId) {
+          setSelectedTech(null);
+          setRefAnswers({});
+        }
+        await loadBaseData();
+      },
+    });
   };
 
   const handleSaveTech = async (technologyId: number) => {
@@ -226,9 +251,9 @@ export default function AdminPage() {
           justification: value.justification,
         }));
       await referenceAnswersApi.save(selectedTech, answers);
-      alert('Reference answers saved!');
+      setModal({ title: 'Success', message: 'Reference answers saved!', variant: 'info' });
     } catch {
-      alert('Failed to save reference answers');
+      setModal({ title: 'Save failed', message: 'Failed to save reference answers.', variant: 'info' });
     } finally {
       setRefSaving(false);
     }
@@ -249,9 +274,16 @@ export default function AdminPage() {
   };
 
   const handleDeleteCategory = async (categoryId: number) => {
-    if (!confirm('Delete this category and all its criteria?')) return;
-    await questionsApi.deleteCategory(categoryId);
-    loadBaseData();
+    setModal({
+      title: 'Delete category',
+      message: 'Delete this category and all its criteria?',
+      variant: 'confirm',
+      onConfirm: async () => {
+        setModal(null);
+        await questionsApi.deleteCategory(categoryId);
+        await loadBaseData();
+      },
+    });
   };
 
   const handleMoveCategory = async (index: number, direction: -1 | 1) => {
@@ -313,9 +345,16 @@ export default function AdminPage() {
   };
 
   const handleDeleteCriterion = async (criterionId: number) => {
-    if (!confirm('Delete this criterion?')) return;
-    await questionsApi.deleteCriterion(criterionId);
-    loadBaseData();
+    setModal({
+      title: 'Delete criterion',
+      message: 'Delete this criterion?',
+      variant: 'confirm',
+      onConfirm: async () => {
+        setModal(null);
+        await questionsApi.deleteCriterion(criterionId);
+        await loadBaseData();
+      },
+    });
   };
 
   const handleMoveCriterion = async (category: Category, index: number, direction: -1 | 1) => {
@@ -337,10 +376,10 @@ export default function AdminPage() {
       await criteriaApi.updateDefaultWeights(
         categories.map((category) => ({ categoryId: category.id, weight: defaultWeights[category.id] ?? 1 }))
       );
-      alert('Default weights saved!');
-      loadBaseData();
+      setModal({ title: 'Success', message: 'Default weights saved!', variant: 'info' });
+      await loadBaseData();
     } catch {
-      alert('Failed to save default weights');
+      setModal({ title: 'Save failed', message: 'Failed to save default weights.', variant: 'info' });
     } finally {
       setWeightsSaving(false);
     }
@@ -817,6 +856,14 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+      <Modal
+        open={!!modal}
+        title={modal?.title ?? ''}
+        message={modal?.message}
+        variant={modal?.variant ?? 'info'}
+        onConfirm={modal?.onConfirm ?? (() => setModal(null))}
+        onCancel={() => setModal(null)}
+      />
     </div>
   );
 }

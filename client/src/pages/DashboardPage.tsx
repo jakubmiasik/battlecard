@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import Modal from '../components/Modal';
 import { comparisonsApi } from '../services/api';
 
 interface TechnologyProgress {
@@ -24,6 +25,12 @@ interface Comparison {
 export default function DashboardPage() {
   const [comparisons, setComparisons] = useState<Comparison[]>([]);
   const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState<{
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+    variant: 'confirm' | 'info';
+  } | null>(null);
   const navigate = useNavigate();
 
   const loadComparisons = async () => {
@@ -41,16 +48,30 @@ export default function DashboardPage() {
   }, []);
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this comparison?')) return;
-    await comparisonsApi.delete(id);
-    setComparisons((prev) => prev.filter((comparison) => comparison.id !== id));
+    setModal({
+      title: 'Delete comparison',
+      message: 'Are you sure you want to delete this comparison?',
+      variant: 'confirm',
+      onConfirm: async () => {
+        setModal(null);
+        await comparisonsApi.delete(id);
+        setComparisons((prev) => prev.filter((comparison) => comparison.id !== id));
+      },
+    });
   };
 
   const handleToggleStatus = async (comparison: Comparison) => {
     const newStatus = comparison.status === 'official' ? 'draft' : 'official';
-    if (!window.confirm(`Change status to ${newStatus === 'official' ? 'Official' : 'Draft'}?`)) return;
-    await comparisonsApi.update(comparison.id, { status: newStatus });
-    await loadComparisons();
+    setModal({
+      title: 'Change comparison status',
+      message: `Change status to ${newStatus === 'official' ? 'Official' : 'Draft'}?`,
+      variant: 'confirm',
+      onConfirm: async () => {
+        setModal(null);
+        await comparisonsApi.update(comparison.id, { status: newStatus });
+        await loadComparisons();
+      },
+    });
   };
 
   if (loading) return <div className="loading">Loading comparisons...</div>;
@@ -108,6 +129,9 @@ export default function DashboardPage() {
                   <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/comparison/${comparison.id}`)}>
                     Open
                   </button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/comparison/${comparison.id}/edit`)}>
+                    Update
+                  </button>
                   <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/comparison/${comparison.id}/results`)}>
                     Results
                   </button>
@@ -143,6 +167,14 @@ export default function DashboardPage() {
           ))}
         </div>
       )}
+      <Modal
+        open={!!modal}
+        title={modal?.title ?? ''}
+        message={modal?.message}
+        variant={modal?.variant ?? 'info'}
+        onConfirm={modal?.onConfirm ?? (() => setModal(null))}
+        onCancel={() => setModal(null)}
+      />
     </div>
   );
 }

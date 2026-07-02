@@ -99,6 +99,8 @@ export const comparisonsApi = {
   }) => fetchApi('/api/comparisons', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: number, data: { clientName?: string | null; comparisonType?: 'client' | 'simple'; useCaseDescription?: string; status?: string }) =>
     fetchApi(`/api/comparisons/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  updateTechnologies: (id: number, technologyIds: number[]) =>
+    fetchApi(`/api/comparisons/${id}/technologies`, { method: 'PUT', body: JSON.stringify({ technologyIds }) }),
   saveScores: (id: number, scores: { technologyId: number; criteriaId: number; score: number; justification?: string }[]) =>
     fetchApi(`/api/comparisons/${id}/scores`, { method: 'PUT', body: JSON.stringify({ scores }) }),
   saveWeights: (id: number, weights: { categoryId: number; weight: number }[]) =>

@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import NewComparisonPage from './pages/NewComparisonPage';
 import ComparisonPage from './pages/ComparisonPage';
+import EditComparisonPage from './pages/EditComparisonPage';
 import ResultsPage from './pages/ResultsPage';
 import AdminPage from './pages/AdminPage';
 
@@ -47,6 +48,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute>
               <ComparisonPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/comparison/:id/edit"
+          element={
+            <ProtectedRoute>
+              <EditComparisonPage />
             </ProtectedRoute>
           }
         />

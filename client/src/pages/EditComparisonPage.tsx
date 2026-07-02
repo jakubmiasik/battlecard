@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import Modal from '../components/Modal';
 import { comparisonsApi, criteriaApi, technologiesApi } from '../services/api';
 
@@ -15,16 +15,24 @@ interface Category {
   criteria: { id: number; name: string; definition: string }[];
 }
 
-interface DefaultWeight {
+interface CategoryWeight {
   categoryId: number;
   weight: number;
 }
 
-export default function NewComparisonPage() {
+interface ComparisonData {
+  id: number;
+  clientName: string | null;
+  useCaseDescription: string | null;
+  comparisonType: 'client' | 'simple';
+  technologies: Technology[];
+  categoryWeights?: CategoryWeight[];
+}
+
+export default function EditComparisonPage() {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const comparisonType = searchParams.get('type') === 'simple' ? 'simple' : 'client';
-  const isSimple = comparisonType === 'simple';
+  const [comparison, setComparison] = useState<ComparisonData | null>(null);
   const [clientName, setClientName] = useState('');
   const [useCaseDescription, setUseCaseDescription] = useState('');
   const [technologies, setTechnologies] = useState<Technology[]>([]);
@@ -33,8 +41,9 @@ export default function NewComparisonPage() {
   const [categoryWeights, setCategoryWeights] = useState<Record<number, number>>({});
   const [newTechName, setNewTechName] = useState('');
   const [newTechDesc, setNewTechDesc] = useState('');
+  const [step, setStep] = useState(1);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [step, setStep] = useState(isSimple ? 2 : 1);
   const [modal, setModal] = useState<{
     title: string;
     message: string;
@@ -43,36 +52,42 @@ export default function NewComparisonPage() {
   } | null>(null);
 
   useEffect(() => {
-    setStep(isSimple ? 2 : 1);
-  }, [isSimple]);
+    const comparisonId = parseInt(id!, 10);
 
-  useEffect(() => {
-    Promise.all([technologiesApi.list(), criteriaApi.list(), criteriaApi.getDefaultWeights()]).then(
-      ([techs, cats, defaultWeights]: [Technology[], Category[], DefaultWeight[]]) => {
-        setTechnologies(techs);
-        setCategories(cats);
+    Promise.all([comparisonsApi.get(comparisonId), technologiesApi.list(), criteriaApi.list()]).then(
+      ([comparisonData, technologiesData, categoriesData]: [ComparisonData, Technology[], Category[]]) => {
+        setComparison(comparisonData);
+        setClientName(comparisonData.clientName || '');
+        setUseCaseDescription(comparisonData.useCaseDescription || '');
+        setTechnologies(technologiesData);
+        setCategories(categoriesData);
+        setSelectedTechs(comparisonData.technologies.map((technology) => technology.id));
 
-        const defaultWeightMap = new Map(defaultWeights.map((item) => [item.categoryId, item.weight]));
-        const weights: Record<number, number> = {};
-        cats.forEach((category) => {
-          weights[category.id] = defaultWeightMap.get(category.id) ?? 1;
+        const nextWeights: Record<number, number> = {};
+        categoriesData.forEach((category) => {
+          nextWeights[category.id] = 1;
         });
-        setCategoryWeights(weights);
+        comparisonData.categoryWeights?.forEach((weight) => {
+          nextWeights[weight.categoryId] = weight.weight;
+        });
+        setCategoryWeights(nextWeights);
+        setLoading(false);
       }
     );
-  }, []);
+  }, [id]);
 
   const selectedTechObjects = useMemo(
     () => technologies.filter((technology) => selectedTechs.includes(technology.id)),
     [technologies, selectedTechs]
   );
 
-  const toggleTech = (id: number) => {
-    setSelectedTechs((prev) => (prev.includes(id) ? prev.filter((techId) => techId !== id) : [...prev, id]));
+  const toggleTech = (technologyId: number) => {
+    setSelectedTechs((prev) => (prev.includes(technologyId) ? prev.filter((id) => id !== technologyId) : [...prev, technologyId]));
   };
 
   const addNewTech = async () => {
     if (!newTechName.trim()) return;
+
     const result = await technologiesApi.create({
       name: newTechName.trim(),
       description: newTechDesc.trim() || undefined,
@@ -87,65 +102,69 @@ export default function NewComparisonPage() {
     setNewTechDesc('');
   };
 
-  const handleCreate = async () => {
-    if ((!isSimple && !clientName.trim()) || selectedTechs.length < 2) return;
+  const handleSave = async () => {
+    if (!comparison || selectedTechs.length < 2) return;
+    if (comparison.comparisonType === 'client' && !clientName.trim()) return;
 
     setSaving(true);
     try {
+      const comparisonId = parseInt(id!, 10);
       const weights = Object.entries(categoryWeights).map(([categoryId, weight]) => ({
         categoryId: parseInt(categoryId, 10),
         weight,
       }));
 
-      const comparison = await comparisonsApi.create({
-        clientName: isSimple ? null : clientName.trim(),
-        comparisonType,
-        useCaseDescription: useCaseDescription.trim(),
-        technologyIds: selectedTechs,
-        categoryWeights: weights,
-      });
+      await Promise.all([
+        comparisonsApi.update(comparisonId, {
+          clientName: clientName.trim() || null,
+          useCaseDescription: useCaseDescription.trim(),
+        }),
+        comparisonsApi.updateTechnologies(comparisonId, selectedTechs),
+        comparisonsApi.saveWeights(comparisonId, weights),
+      ]);
 
-      navigate(`/comparison/${comparison.id}`);
-    } catch {
-      setModal({ title: 'Create comparison failed', message: 'Failed to create comparison.', variant: 'info' });
+      navigate(`/comparison/${comparisonId}`);
+    } catch (error) {
+      setModal({
+        title: 'Unable to save changes',
+        message: error instanceof Error ? error.message : 'Failed to update comparison.',
+        variant: 'info',
+      });
     } finally {
       setSaving(false);
     }
   };
 
+  if (loading) return <div className="loading">Loading comparison...</div>;
+  if (!comparison) return <div className="loading">Comparison not found</div>;
+
   return (
     <div className="container page-stack">
       <section className="page-header-block">
         <div>
-          <span className="eyebrow">New comparison</span>
-          <h1 className="page-title">{isSimple ? 'Simple technology comparison' : 'Client technology comparison'}</h1>
-          <p className="page-subtitle">
-            {isSimple
-              ? 'Skip account context and jump directly into selecting technologies and category emphasis.'
-              : 'Capture client context, select the technologies, and tune the scoring weights before you begin.'}
-          </p>
+          <span className="eyebrow">Update comparison</span>
+          <h1 className="page-title">{comparison.clientName || (comparison.comparisonType === 'simple' ? 'Simple comparison' : 'Untitled client comparison')}</h1>
+          <p className="page-subtitle">Adjust the client context, selected technologies, and category weights before returning to scoring.</p>
         </div>
       </section>
 
       <div className="tabs">
-        {!isSimple && (
-          <button className={`tab ${step === 1 ? 'active' : ''}`} onClick={() => setStep(1)}>
-            Client context
-          </button>
-        )}
-        <button className={`tab ${step === 2 ? 'active' : ''}`} onClick={() => (!isSimple ? step >= 2 : true) && setStep(2)}>
+        <button className={`tab ${step === 1 ? 'active' : ''}`} onClick={() => setStep(1)}>
+          Client context
+        </button>
+        <button className={`tab ${step === 2 ? 'active' : ''}`} onClick={() => setStep(2)}>
           Technologies
         </button>
-        <button className={`tab ${step === 3 ? 'active' : ''}`} onClick={() => step >= 3 && setStep(3)}>
+        <button className={`tab ${step === 3 ? 'active' : ''}`} onClick={() => setStep(3)}>
           Category weights
         </button>
       </div>
 
-      {!isSimple && step === 1 && (
+      {step === 1 && (
         <section className="card form-card">
-          <h3>Client information</h3>
+          <h3>Client context</h3>
           <div className="form-group">
-            <label>Client name *</label>
+            <label>Client name {comparison.comparisonType === 'client' ? '*' : ''}</label>
             <input value={clientName} onChange={(event) => setClientName(event.target.value)} placeholder="e.g. Contoso Retail" />
           </div>
           <div className="form-group">
@@ -157,7 +176,10 @@ export default function NewComparisonPage() {
             />
           </div>
           <div className="hero-actions">
-            <button className="btn btn-primary" onClick={() => setStep(2)} disabled={!clientName.trim()}>
+            <button className="btn btn-ghost" onClick={() => navigate(`/comparison/${id}`)}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" onClick={() => setStep(2)} disabled={comparison.comparisonType === 'client' && !clientName.trim()}>
               Continue to technologies
             </button>
           </div>
@@ -168,8 +190,8 @@ export default function NewComparisonPage() {
         <section className="card form-card">
           <div className="section-heading-row">
             <div>
-              <h3>Select technologies</h3>
-              <p className="muted">Pick at least two technologies. Add a new one if you do not see it listed.</p>
+              <h3>Technologies</h3>
+              <p className="muted">Pick at least two technologies. Add a new one if needed.</p>
             </div>
             <span className="pill pill-outline">{selectedTechs.length} selected</span>
           </div>
@@ -177,6 +199,7 @@ export default function NewComparisonPage() {
           <div className="option-grid">
             {technologies.map((technology) => {
               const selected = selectedTechs.includes(technology.id);
+
               return (
                 <button
                   key={technology.id}
@@ -218,11 +241,9 @@ export default function NewComparisonPage() {
           </div>
 
           <div className="hero-actions">
-            {!isSimple && (
-              <button className="btn btn-ghost" onClick={() => setStep(1)}>
-                Back
-              </button>
-            )}
+            <button className="btn btn-ghost" onClick={() => setStep(1)}>
+              Back
+            </button>
             <button className="btn btn-primary" onClick={() => setStep(3)} disabled={selectedTechs.length < 2}>
               Continue to weights
             </button>
@@ -235,7 +256,7 @@ export default function NewComparisonPage() {
           <div className="section-heading-row">
             <div>
               <h3>Category weights</h3>
-              <p className="muted">Weights start from the admin-defined defaults and can be adjusted for this comparison.</p>
+              <p className="muted">Update how strongly each category influences the final result.</p>
             </div>
           </div>
 
@@ -268,12 +289,17 @@ export default function NewComparisonPage() {
             <button className="btn btn-ghost" onClick={() => setStep(2)}>
               Back
             </button>
-            <button className="btn btn-primary" onClick={handleCreate} disabled={saving}>
-              {saving ? 'Creating...' : 'Create comparison'}
+            <button
+              className="btn btn-primary"
+              onClick={handleSave}
+              disabled={saving || selectedTechs.length < 2 || (comparison.comparisonType === 'client' && !clientName.trim())}
+            >
+              {saving ? 'Saving...' : 'Save changes'}
             </button>
           </div>
         </section>
       )}
+
       <Modal
         open={!!modal}
         title={modal?.title ?? ''}

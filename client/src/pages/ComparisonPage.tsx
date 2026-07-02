@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import Modal from '../components/Modal';
 import { comparisonsApi, criteriaApi } from '../services/api';
 
 interface Category {
@@ -57,6 +58,12 @@ export default function ComparisonPage() {
   const [activeCategory, setActiveCategory] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState<{
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+    variant: 'confirm' | 'info';
+  } | null>(null);
 
   useEffect(() => {
     Promise.all([comparisonsApi.get(parseInt(id!, 10)), criteriaApi.list()]).then(([comp, cats]) => {
@@ -110,9 +117,9 @@ export default function ComparisonPage() {
         comparisonsApi.saveScores(parseInt(id!, 10), allScores),
         comparisonsApi.saveWeights(parseInt(id!, 10), allWeights),
       ]);
-      alert('Saved successfully!');
+      setModal({ title: 'Success', message: 'Saved successfully!', variant: 'info' });
     } catch {
-      alert('Failed to save');
+      setModal({ title: 'Save failed', message: 'Failed to save.', variant: 'info' });
     } finally {
       setSaving(false);
     }
@@ -185,19 +192,16 @@ export default function ComparisonPage() {
                   <div className="sidebar-link-title">{category.name}</div>
                   <div className="sidebar-progress-list">
                     {categoryProgress[category.id]?.map((item) => (
-                      <span
-                        className="mini-progress-pill"
-                        key={item.technologyId}
-                        title="Number of criteria scored out of total for this technology"
-                      >
-                        {item.technologyName}: {item.scored}/{item.total}
+                      <div className="sidebar-tech-progress" key={item.technologyId}>
+                        <span className="mini-progress-pill" title="Number of criteria scored out of total for this technology">
+                          {item.technologyName}: {item.scored}/{item.total}
+                        </span>
                         {item.avgScore !== null && (
-                          <>
-                            {' '}
-                            (<span className={`score-inline sidebar-score-inline ${getScoreClass(item.avgScore)}`}>avg {item.avgScore.toFixed(2)}</span>)
-                          </>
+                          <span className={`mini-progress-pill score-inline sidebar-score-inline ${getScoreClass(item.avgScore)}`}>
+                            {item.technologyName} avg. {item.avgScore.toFixed(2)}
+                          </span>
                         )}
-                      </span>
+                      </div>
                     ))}
                   </div>
                 </button>
@@ -227,7 +231,7 @@ export default function ComparisonPage() {
           )}
         </aside>
 
-        <main className="main-content">
+        <main className="main-content page-stack">
           {visibleCategories.map((category) => (
             <section className="card table-card" key={category.id}>
               <div className="section-heading-row">
@@ -291,6 +295,14 @@ export default function ComparisonPage() {
           ))}
         </main>
       </div>
+      <Modal
+        open={!!modal}
+        title={modal?.title ?? ''}
+        message={modal?.message}
+        variant={modal?.variant ?? 'info'}
+        onConfirm={modal?.onConfirm ?? (() => setModal(null))}
+        onCancel={() => setModal(null)}
+      />
     </div>
   );
 }

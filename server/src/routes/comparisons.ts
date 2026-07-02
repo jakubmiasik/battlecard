@@ -13,6 +13,34 @@ type ComparisonPayload = {
   categoryWeights?: { categoryId: number; weight: number }[];
 };
 
+async function touchComparison(pool: sql.ConnectionPool, comparisonId: number) {
+  await pool.request().input('comparisonId', sql.Int, comparisonId).query(`
+    UPDATE Comparisons
+    SET updatedAt = GETUTCDATE()
+    WHERE id = @comparisonId
+  `);
+}
+
+async function seedComparisonScoresFromReferenceAnswers(pool: sql.ConnectionPool, comparisonId: number, technologyId: number) {
+  await pool
+    .request()
+    .input('compId', sql.Int, comparisonId)
+    .input('techId', sql.Int, technologyId)
+    .query(`
+      INSERT INTO ComparisonScores (comparisonId, technologyId, criteriaId, score, justification, updatedBy)
+      SELECT @compId, @techId, ra.criteriaId, ra.score, ra.justification, ra.updatedBy
+      FROM ReferenceAnswers ra
+      WHERE ra.technologyId = @techId
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ComparisonScores cs
+          WHERE cs.comparisonId = @compId
+            AND cs.technologyId = @techId
+            AND cs.criteriaId = ra.criteriaId
+        )
+    `);
+}
+
 async function getCurrentUserId(req: AuthRequest): Promise<number | null> {
   const pool = await getPool();
   const userResult = await pool
@@ -193,16 +221,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     `);
 
     for (const techId of technologyIds) {
-      await pool
-        .request()
-        .input('compId', sql.Int, compId)
-        .input('techId', sql.Int, techId)
-        .query(`
-          INSERT INTO ComparisonScores (comparisonId, technologyId, criteriaId, score, justification, updatedBy)
-          SELECT @compId, @techId, ra.criteriaId, ra.score, ra.justification, ra.updatedBy
-          FROM ReferenceAnswers ra
-          WHERE ra.technologyId = @techId
-        `);
+      await seedComparisonScoresFromReferenceAnswers(pool, compId, techId);
     }
 
     res.status(201).json(compResult.recordset[0]);
@@ -226,7 +245,7 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
 
     const existing = current.recordset[0];
     const resolvedType = comparisonType ?? existing.comparisonType ?? 'client';
-    const nextClientName = resolvedType === 'simple' ? null : (clientName?.trim() || existing.clientName || null);
+    const nextClientName = clientName === undefined ? existing.clientName : clientName?.trim() || null;
 
     if (resolvedType === 'client' && !nextClientName) {
       res.status(400).json({ error: 'Client name is required for client comparisons' });
@@ -255,6 +274,89 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Update comparison error:', error);
     res.status(500).json({ error: 'Failed to update comparison' });
+  }
+});
+
+router.put('/:id/technologies', async (req: AuthRequest, res: Response) => {
+  try {
+    const comparisonId = parseInt(req.params.id, 10);
+    const { technologyIds } = req.body as ComparisonPayload;
+
+    if (!Array.isArray(technologyIds)) {
+      res.status(400).json({ error: 'technologyIds array is required' });
+      return;
+    }
+
+    const nextTechnologyIds = [...new Set(technologyIds.map((value) => parseInt(String(value), 10)).filter((value) => Number.isInteger(value)))];
+    if (nextTechnologyIds.length < 2) {
+      res.status(400).json({ error: 'At least two technologies are required' });
+      return;
+    }
+
+    const pool = await getPool();
+    const currentComparison = await pool.request().input('id', sql.Int, comparisonId).query('SELECT id FROM Comparisons WHERE id = @id');
+    if (currentComparison.recordset.length === 0) {
+      res.status(404).json({ error: 'Comparison not found' });
+      return;
+    }
+
+    const currentTechnologies = await pool.request().input('comparisonId', sql.Int, comparisonId).query(`
+      SELECT technologyId
+      FROM ComparisonTechnologies
+      WHERE comparisonId = @comparisonId
+    `);
+
+    const currentTechnologyIds = currentTechnologies.recordset.map((row) => row.technologyId as number);
+    const technologyIdsToRemove = currentTechnologyIds.filter((technologyId) => !nextTechnologyIds.includes(technologyId));
+    const technologyIdsToAdd = nextTechnologyIds.filter((technologyId) => !currentTechnologyIds.includes(technologyId));
+
+    for (const technologyId of technologyIdsToRemove) {
+      await pool
+        .request()
+        .input('comparisonId', sql.Int, comparisonId)
+        .input('technologyId', sql.Int, technologyId)
+        .query(`
+          DELETE FROM ComparisonScores
+          WHERE comparisonId = @comparisonId AND technologyId = @technologyId
+        `);
+
+      await pool
+        .request()
+        .input('comparisonId', sql.Int, comparisonId)
+        .input('technologyId', sql.Int, technologyId)
+        .query(`
+          DELETE FROM ComparisonTechnologies
+          WHERE comparisonId = @comparisonId AND technologyId = @technologyId
+        `);
+    }
+
+    for (const technologyId of technologyIdsToAdd) {
+      await pool
+        .request()
+        .input('comparisonId', sql.Int, comparisonId)
+        .input('technologyId', sql.Int, technologyId)
+        .query(`
+          INSERT INTO ComparisonTechnologies (comparisonId, technologyId)
+          VALUES (@comparisonId, @technologyId)
+        `);
+
+      await seedComparisonScoresFromReferenceAnswers(pool, comparisonId, technologyId);
+    }
+
+    await touchComparison(pool, comparisonId);
+
+    const technologies = await pool.request().input('comparisonId', sql.Int, comparisonId).query(`
+      SELECT t.*
+      FROM ComparisonTechnologies ct
+      JOIN Technologies t ON ct.technologyId = t.id
+      WHERE ct.comparisonId = @comparisonId
+      ORDER BY t.name
+    `);
+
+    res.json(technologies.recordset);
+  } catch (error) {
+    console.error('Update comparison technologies error:', error);
+    res.status(500).json({ error: 'Failed to update comparison technologies' });
   }
 });
 
