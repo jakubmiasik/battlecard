@@ -58,12 +58,14 @@ router.get('/', async (req: AuthRequest, res: Response) => {
 
     const comparisonsResult = await pool.request().input('userId', sql.Int, userId).query(`
       SELECT c.id, c.clientName, c.useCaseDescription, c.comparisonType, c.status, c.createdAt, c.updatedAt,
-             STRING_AGG(t.name, ', ') WITHIN GROUP (ORDER BY t.name) as technologyNames
+             STRING_AGG(t.name, ', ') WITHIN GROUP (ORDER BY t.name) as technologyNames,
+             creator.displayName as createdByName
       FROM Comparisons c
       LEFT JOIN ComparisonTechnologies ct ON ct.comparisonId = c.id
       LEFT JOIN Technologies t ON t.id = ct.technologyId
+      LEFT JOIN AppUsers creator ON creator.id = c.createdBy
       WHERE c.createdBy = @userId
-      GROUP BY c.id, c.clientName, c.useCaseDescription, c.comparisonType, c.status, c.createdAt, c.updatedAt
+      GROUP BY c.id, c.clientName, c.useCaseDescription, c.comparisonType, c.status, c.createdAt, c.updatedAt, creator.displayName
       ORDER BY c.updatedAt DESC
     `);
 
@@ -149,6 +151,102 @@ router.get('/', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('List comparisons error:', error);
     res.status(500).json({ error: 'Failed to list comparisons' });
+  }
+});
+
+// Get comparisons shared with the current user — must be before /:id
+router.get('/shared/with-me', async (req: AuthRequest, res: Response) => {
+  try {
+    const pool = await getPool();
+    const userId = await getCurrentUserId(req);
+
+    const comparisonsResult = await pool.request().input('userId', sql.Int, userId).query(`
+      SELECT c.id, c.clientName, c.useCaseDescription, c.comparisonType, c.status, c.createdAt, c.updatedAt,
+             STRING_AGG(t.name, ', ') WITHIN GROUP (ORDER BY t.name) as technologyNames,
+             creator.displayName as createdByName,
+             sharer.displayName as sharedByName,
+             cs.sharedAt
+      FROM ComparisonShares cs
+      JOIN Comparisons c ON c.id = cs.comparisonId
+      LEFT JOIN ComparisonTechnologies ct ON ct.comparisonId = c.id
+      LEFT JOIN Technologies t ON t.id = ct.technologyId
+      LEFT JOIN AppUsers creator ON creator.id = c.createdBy
+      LEFT JOIN AppUsers sharer ON sharer.id = cs.sharedByUserId
+      WHERE cs.sharedWithUserId = @userId
+      GROUP BY c.id, c.clientName, c.useCaseDescription, c.comparisonType, c.status, c.createdAt, c.updatedAt,
+               creator.displayName, sharer.displayName, cs.sharedAt
+      ORDER BY cs.sharedAt DESC
+    `);
+
+    const compIds = comparisonsResult.recordset.map((r) => r.id);
+    const progressByComparison = new Map<number, unknown[]>();
+
+    if (compIds.length > 0) {
+      const idList = compIds.join(',');
+      const progressResult = await pool.request().query(`
+        WITH TotalCriteria AS (SELECT COUNT(*) as totalCriteria FROM Criteria)
+        SELECT c.id as comparisonId, t.id as technologyId, t.name as technologyName,
+               COUNT(csc.id) as scoredCount, tc.totalCriteria
+        FROM Comparisons c
+        JOIN ComparisonTechnologies ct ON ct.comparisonId = c.id
+        JOIN Technologies t ON t.id = ct.technologyId
+        CROSS JOIN TotalCriteria tc
+        LEFT JOIN ComparisonScores csc ON csc.comparisonId = c.id AND csc.technologyId = t.id
+        WHERE c.id IN (${idList})
+        GROUP BY c.id, t.id, t.name, tc.totalCriteria
+      `);
+      for (const row of progressResult.recordset) {
+        const current = progressByComparison.get(row.comparisonId) ?? [];
+        current.push({ technologyId: row.technologyId, technologyName: row.technologyName, scoredCount: row.scoredCount, totalCriteria: row.totalCriteria });
+        progressByComparison.set(row.comparisonId, current);
+      }
+    }
+
+    const winnerByComparison = new Map<number, { winnerName: string; winnerScore: number }>();
+    if (compIds.length > 0) {
+      const idList = compIds.join(',');
+      const winnerResult = await pool.request().query(`
+        WITH TechWeightedScores AS (
+          SELECT c.id as comparisonId, t.id as technologyId, t.name as technologyName,
+                 cat.id as categoryId, COALESCE(cw.weight, 1) as weight,
+                 AVG(CAST(csc.score AS FLOAT)) as avgScore
+          FROM Comparisons c
+          JOIN ComparisonTechnologies ct ON ct.comparisonId = c.id
+          JOIN Technologies t ON t.id = ct.technologyId
+          JOIN ComparisonScores csc ON csc.comparisonId = c.id AND csc.technologyId = t.id
+          JOIN Criteria cr ON cr.id = csc.criteriaId
+          JOIN Categories cat ON cat.id = cr.categoryId
+          LEFT JOIN CategoryWeights cw ON cw.comparisonId = c.id AND cw.categoryId = cat.id
+          WHERE c.id IN (${idList})
+          GROUP BY c.id, t.id, t.name, cat.id, cw.weight
+        ),
+        TechFinalScores AS (
+          SELECT comparisonId, technologyId, technologyName,
+                 CASE WHEN SUM(weight) > 0 THEN SUM(avgScore * weight) / SUM(weight) ELSE 0 END as finalScore
+          FROM TechWeightedScores GROUP BY comparisonId, technologyId, technologyName
+        ),
+        RankedTechs AS (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY comparisonId ORDER BY finalScore DESC) as rn
+          FROM TechFinalScores
+        )
+        SELECT comparisonId, technologyName as winnerName, ROUND(finalScore, 2) as winnerScore
+        FROM RankedTechs WHERE rn = 1
+      `);
+      for (const row of winnerResult.recordset) {
+        winnerByComparison.set(row.comparisonId, { winnerName: row.winnerName, winnerScore: row.winnerScore });
+      }
+    }
+
+    res.json(
+      comparisonsResult.recordset.map((comparison) => ({
+        ...comparison,
+        technologyProgress: progressByComparison.get(comparison.id) ?? [],
+        winner: winnerByComparison.get(comparison.id) ?? null,
+      }))
+    );
+  } catch (error) {
+    console.error('Get shared comparisons error:', error);
+    res.status(500).json({ error: 'Failed to get shared comparisons' });
   }
 });
 
@@ -562,6 +660,76 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Delete comparison error:', error);
     res.status(500).json({ error: 'Failed to delete comparison' });
+  }
+});
+
+// Share a comparison with users
+router.post('/:id/share', async (req: AuthRequest, res: Response) => {
+  try {
+    const comparisonId = parseInt(req.params.id, 10);
+    const { userIds } = req.body as { userIds: number[] };
+    const pool = await getPool();
+    const sharedByUserId = await getCurrentUserId(req);
+
+    for (const userId of userIds) {
+      await pool
+        .request()
+        .input('comparisonId', sql.Int, comparisonId)
+        .input('sharedWithUserId', sql.Int, userId)
+        .input('sharedByUserId', sql.Int, sharedByUserId)
+        .query(`
+          IF NOT EXISTS (
+            SELECT 1 FROM ComparisonShares
+            WHERE comparisonId = @comparisonId AND sharedWithUserId = @sharedWithUserId
+          )
+          INSERT INTO ComparisonShares (comparisonId, sharedWithUserId, sharedByUserId)
+          VALUES (@comparisonId, @sharedWithUserId, @sharedByUserId)
+        `);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Share comparison error:', error);
+    res.status(500).json({ error: 'Failed to share comparison' });
+  }
+});
+
+// Get users a comparison is shared with
+router.get('/:id/shares', async (req: AuthRequest, res: Response) => {
+  try {
+    const comparisonId = parseInt(req.params.id, 10);
+    const pool = await getPool();
+
+    const result = await pool.request().input('comparisonId', sql.Int, comparisonId).query(`
+      SELECT cs.id, cs.sharedWithUserId, u.displayName, u.email, cs.sharedAt
+      FROM ComparisonShares cs
+      JOIN AppUsers u ON u.id = cs.sharedWithUserId
+      WHERE cs.comparisonId = @comparisonId
+      ORDER BY cs.sharedAt DESC
+    `);
+
+    res.json(result.recordset);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get shares' });
+  }
+});
+
+// Unshare a comparison from a user
+router.delete('/:id/share/:userId', async (req: AuthRequest, res: Response) => {
+  try {
+    const comparisonId = parseInt(req.params.id, 10);
+    const userId = parseInt(req.params.userId, 10);
+    const pool = await getPool();
+
+    await pool
+      .request()
+      .input('comparisonId', sql.Int, comparisonId)
+      .input('userId', sql.Int, userId)
+      .query('DELETE FROM ComparisonShares WHERE comparisonId = @comparisonId AND sharedWithUserId = @userId');
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to unshare comparison' });
   }
 });
 

@@ -89,6 +89,7 @@ export const referenceAnswersApi = {
 
 export const comparisonsApi = {
   list: () => fetchApi('/api/comparisons'),
+  listShared: () => fetchApi('/api/comparisons/shared/with-me'),
   get: (id: number) => fetchApi(`/api/comparisons/${id}`),
   create: (data: {
     clientName?: string | null;
@@ -107,4 +108,9 @@ export const comparisonsApi = {
     fetchApi(`/api/comparisons/${id}/weights`, { method: 'PUT', body: JSON.stringify({ weights }) }),
   getResults: (id: number) => fetchApi(`/api/comparisons/${id}/results`),
   delete: (id: number) => fetchApi(`/api/comparisons/${id}`, { method: 'DELETE' }),
+  share: (id: number, userIds: number[]) =>
+    fetchApi(`/api/comparisons/${id}/share`, { method: 'POST', body: JSON.stringify({ userIds }) }),
+  getShares: (id: number) => fetchApi(`/api/comparisons/${id}/shares`),
+  unshare: (id: number, userId: number) =>
+    fetchApi(`/api/comparisons/${id}/share/${userId}`, { method: 'DELETE' }),
 };

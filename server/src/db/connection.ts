@@ -231,6 +231,19 @@ async function runMigrations(pool: sql.ConnectionPool): Promise<void> {
       SELECT 1 FROM DefaultCategoryWeights dcw WHERE dcw.categoryId = c.id
     );
   `);
+
+  // ComparisonShares table
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'ComparisonShares')
+    CREATE TABLE ComparisonShares (
+      id INT IDENTITY(1,1) PRIMARY KEY,
+      comparisonId INT NOT NULL FOREIGN KEY REFERENCES Comparisons(id) ON DELETE CASCADE,
+      sharedWithUserId INT NOT NULL FOREIGN KEY REFERENCES AppUsers(id),
+      sharedByUserId INT NOT NULL FOREIGN KEY REFERENCES AppUsers(id),
+      sharedAt DATETIME2 DEFAULT GETUTCDATE(),
+      UNIQUE(comparisonId, sharedWithUserId)
+    );
+  `);
 }
 
 async function seedCategoriesAndCriteria(pool: sql.ConnectionPool): Promise<void> {
