@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { initDb } from './db/connection.js';
 import { authMiddleware } from './middleware/auth.js';
+import { requireActive } from './middleware/roles.js';
 import authRoutes from './routes/auth.js';
 import usersRoutes from './routes/users.js';
 import technologiesRoutes from './routes/technologies.js';
@@ -23,12 +24,12 @@ app.use(cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
-app.use('/api/users', authMiddleware, usersRoutes);
-app.use('/api/technologies', authMiddleware, technologiesRoutes);
-app.use('/api/comparisons', authMiddleware, comparisonsRoutes);
-app.use('/api/criteria', authMiddleware, criteriaRoutes);
-app.use('/api/questions', authMiddleware, questionsRoutes);
-app.use('/api/reference-answers', authMiddleware, referenceAnswersRoutes);
+app.use('/api/users', authMiddleware, requireActive, usersRoutes);
+app.use('/api/technologies', authMiddleware, requireActive, technologiesRoutes);
+app.use('/api/comparisons', authMiddleware, requireActive, comparisonsRoutes);
+app.use('/api/criteria', authMiddleware, requireActive, criteriaRoutes);
+app.use('/api/questions', authMiddleware, requireActive, questionsRoutes);
+app.use('/api/reference-answers', authMiddleware, requireActive, referenceAnswersRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });

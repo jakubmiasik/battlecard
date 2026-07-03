@@ -24,7 +24,21 @@ router.post('/login', authMiddleware, async (req: AuthRequest, res: Response) =>
         res.status(403).json({ error: 'Account is blocked. Contact an administrator.' });
         return;
       }
-      res.json(existing.recordset[0]);
+      // Always update displayName and email from token on each login
+      const updated = await pool
+        .request()
+        .input('oid', oid)
+        .input('email', sql.NVarChar, normalizedEmail)
+        .input('name', sql.NVarChar, name)
+        .query(`
+          UPDATE AppUsers
+          SET displayName = COALESCE(NULLIF(@name, ''), displayName),
+              email = COALESCE(NULLIF(@email, ''), email),
+              updatedAt = GETUTCDATE()
+          OUTPUT INSERTED.*
+          WHERE entraObjectId = @oid
+        `);
+      res.json(updated.recordset[0]);
       return;
     }
 

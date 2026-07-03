@@ -31,13 +31,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAuthenticated = useIsAuthenticated();
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [blocked, setBlocked] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) {
       authApi
         .login()
         .then(setUser)
-        .catch(console.error)
+        .catch((err) => {
+          if (err.message?.includes('blocked')) {
+            setBlocked(true);
+          }
+          console.error(err);
+        })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -49,8 +55,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    setBlocked(false);
     instance.logoutPopup().then(() => setUser(null));
   };
+
+  if (blocked) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: '1rem' }}>
+        <h2>Account Blocked</h2>
+        <p>Your account has been blocked by an administrator. Contact your admin for assistance.</p>
+        <button onClick={logout} className="btn btn-primary">Sign Out</button>
+      </div>
+    );
+  }
 
   return (
     <AuthContext.Provider value={{ user, isAdmin: user?.role === 'admin', loading, login, logout }}>

@@ -34,7 +34,7 @@ export default function Navbar() {
             <button className="account-trigger" onClick={() => setMenuOpen((value) => !value)}>
               <span className="account-avatar">{user?.displayName?.charAt(0) || 'U'}</span>
               <span>
-                <strong>{user?.displayName}</strong>
+                <strong>{user?.displayName || 'User'}</strong>
                 <small>{user?.role}</small>
               </span>
               <span aria-hidden="true">▾</span>
@@ -42,8 +42,8 @@ export default function Navbar() {
             {menuOpen && (
               <div className="account-dropdown">
                 <div className="account-dropdown-meta">
-                  <strong>{user?.displayName}</strong>
-                  <span>{user?.email}</span>
+                  <strong>{user?.displayName || 'User'}</strong>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{user?.email || '—'}</span>
                 </div>
                 <button className="dropdown-link danger" onClick={logout}>
                   Sign out
