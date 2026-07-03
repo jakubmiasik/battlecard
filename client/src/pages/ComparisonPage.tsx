@@ -284,7 +284,7 @@ export default function ComparisonPage() {
                 <table className="comparison-table">
                   <thead>
                     <tr>
-                      <th style={{ width: '24rem' }}>Criterion</th>
+                      <th style={{ width: '20rem' }}>Criterion</th>
                       {comparison.technologies.map((technology: Technology) => (
                         <th key={technology.id}>{technology.name}</th>
                       ))}
