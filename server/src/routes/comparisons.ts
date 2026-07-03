@@ -97,10 +97,53 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       progressByComparison.set(row.comparisonId, current);
     }
 
+    // Calculate winner for each comparison
+    const winnerResult = await pool.request().input('userId', sql.Int, userId).query(`
+      WITH TechWeightedScores AS (
+        SELECT c.id as comparisonId,
+               t.id as technologyId,
+               t.name as technologyName,
+               cat.id as categoryId,
+               COALESCE(cw.weight, 1) as weight,
+               AVG(CAST(cs.score AS FLOAT)) as avgScore
+        FROM Comparisons c
+        JOIN ComparisonTechnologies ct ON ct.comparisonId = c.id
+        JOIN Technologies t ON t.id = ct.technologyId
+        JOIN ComparisonScores cs ON cs.comparisonId = c.id AND cs.technologyId = t.id
+        JOIN Criteria cr ON cr.id = cs.criteriaId
+        JOIN Categories cat ON cat.id = cr.categoryId
+        LEFT JOIN CategoryWeights cw ON cw.comparisonId = c.id AND cw.categoryId = cat.id
+        WHERE c.createdBy = @userId
+        GROUP BY c.id, t.id, t.name, cat.id, cw.weight
+      ),
+      TechFinalScores AS (
+        SELECT comparisonId, technologyId, technologyName,
+               CASE WHEN SUM(weight) > 0 THEN SUM(avgScore * weight) / SUM(weight) ELSE 0 END as finalScore
+        FROM TechWeightedScores
+        GROUP BY comparisonId, technologyId, technologyName
+      ),
+      RankedTechs AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY comparisonId ORDER BY finalScore DESC) as rn
+        FROM TechFinalScores
+      )
+      SELECT comparisonId, technologyName as winnerName, ROUND(finalScore, 2) as winnerScore
+      FROM RankedTechs
+      WHERE rn = 1
+    `);
+
+    const winnerByComparison = new Map<number, { winnerName: string; winnerScore: number }>();
+    for (const row of winnerResult.recordset) {
+      winnerByComparison.set(row.comparisonId, {
+        winnerName: row.winnerName,
+        winnerScore: row.winnerScore,
+      });
+    }
+
     res.json(
       comparisonsResult.recordset.map((comparison) => ({
         ...comparison,
         technologyProgress: progressByComparison.get(comparison.id) ?? [],
+        winner: winnerByComparison.get(comparison.id) ?? null,
       }))
     );
   } catch (error) {

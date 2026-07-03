@@ -20,6 +20,7 @@ interface Comparison {
   createdAt: string;
   updatedAt: string;
   technologyProgress: TechnologyProgress[];
+  winner: { winnerName: string; winnerScore: number } | null;
 }
 
 export default function DashboardPage() {
@@ -74,6 +75,15 @@ export default function DashboardPage() {
     });
   };
 
+  const handleShare = (comparison: Comparison) => {
+    const url = `${window.location.origin}/comparison/${comparison.id}/results`;
+    navigator.clipboard.writeText(url).then(() => {
+      setModal({ title: 'Link Copied', message: 'The results link has been copied to your clipboard. Share it with other users who have access to the app.', variant: 'info' });
+    }).catch(() => {
+      setModal({ title: 'Share Link', message: url, variant: 'info' });
+    });
+  };
+
   if (loading) return <div className="loading">Loading comparisons...</div>;
 
   return (
@@ -119,11 +129,26 @@ export default function DashboardPage() {
                     >
                       {comparison.status}
                     </button>
+                    <button
+                      type="button"
+                      className="pill pill-outline share-pill"
+                      onClick={() => handleShare(comparison)}
+                      title="Copy a shareable link to the results page"
+                    >
+                      📤 Share
+                    </button>
                   </div>
                   <h3>{comparison.clientName || 'Untitled simple comparison'}</h3>
                   <p className="muted">
                     {comparison.useCaseDescription?.trim() || 'No use case summary added yet.'}
                   </p>
+                  {comparison.winner && (
+                    <div className="winner-row" title="Technology with the highest weighted score">
+                      <img src="/trophy.png" alt="Winner" className="winner-icon" />
+                      <span className="winner-name">{comparison.winner.winnerName}</span>
+                      <span className="winner-score">({comparison.winner.winnerScore.toFixed(2)})</span>
+                    </div>
+                  )}
                 </div>
                 <div className="comparison-card-actions">
                   <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/comparison/${comparison.id}`)}>

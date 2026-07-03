@@ -528,6 +528,35 @@ textarea:focus {
   gap: 0.5rem;
 }
 
+.winner-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.winner-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.winner-name {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--primary);
+}
+
+.winner-score {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.share-pill {
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
 .option-grid,
 .weight-grid,
 .results-grid {
