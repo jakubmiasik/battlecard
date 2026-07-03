@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Modal from '../components/Modal';
-import { comparisonsApi, criteriaApi } from '../services/api';
+import { comparisonsApi, criteriaApi, referenceAnswersApi } from '../services/api';
 
 interface Category {
   id: number;
@@ -57,6 +57,7 @@ export default function ComparisonPage() {
   const [weights, setWeights] = useState<Record<number, number>>({});
   const [activeCategory, setActiveCategory] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<{
     title: string;
@@ -125,6 +126,41 @@ export default function ComparisonPage() {
     }
   };
 
+  const handleRestore = () => {
+    setModal({
+      title: 'Restore Reference Answers',
+      message: 'This will replace all current scores and justifications with the predefined reference answers for each technology. Unsaved changes will be lost. Continue?',
+      variant: 'confirm',
+      onConfirm: async () => {
+        setModal(null);
+        setRestoring(true);
+        try {
+          const techs: Technology[] = comparison.technologies;
+          const refs = await Promise.all(techs.map((t) => referenceAnswersApi.get(t.id)));
+
+          const newScores: Record<string, Score> = {};
+          refs.forEach((refAnswers: any[]) => {
+            refAnswers.forEach((ra: any) => {
+              const key = `${ra.technologyId}-${ra.criteriaId}`;
+              newScores[key] = {
+                technologyId: ra.technologyId,
+                criteriaId: ra.criteriaId,
+                score: ra.score || 0,
+                justification: ra.justification || '',
+              };
+            });
+          });
+          setScores(newScores);
+          setModal({ title: 'Restored', message: 'All answers have been restored from reference data. Remember to save your changes.', variant: 'info' });
+        } catch {
+          setModal({ title: 'Restore failed', message: 'Failed to load reference answers.', variant: 'info' });
+        } finally {
+          setRestoring(false);
+        }
+      },
+    });
+  };
+
   const activeCat = categories.find((category) => category.id === activeCategory);
   const visibleCategories = activeCategory === null ? categories : activeCat ? [activeCat] : [];
 
@@ -167,6 +203,9 @@ export default function ComparisonPage() {
         <div className="hero-actions wrap">
           <button className="btn btn-primary" onClick={handleSave} disabled={saving} title="Persist all scores and weights to the database">
             {saving ? 'Saving...' : 'Save changes'}
+          </button>
+          <button className="btn btn-secondary" onClick={handleRestore} disabled={restoring} title="Replace all scores with predefined reference answers for each technology">
+            {restoring ? 'Restoring...' : 'Restore from Reference'}
           </button>
           <button className="btn btn-secondary" onClick={() => navigate(`/comparison/${id}/results`)} title="Calculate and display the final weighted recommendation">
             View results
