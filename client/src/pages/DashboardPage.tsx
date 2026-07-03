@@ -46,6 +46,7 @@ export default function DashboardPage() {
   const [shareModal, setShareModal] = useState<{ comparisonId: number; comparisonName: string } | null>(null);
   const [allUsers, setAllUsers] = useState<AppUserBasic[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
+  const [userSearch, setUserSearch] = useState('');
   const [sharing, setSharing] = useState(false);
   const navigate = useNavigate();
 
@@ -99,6 +100,7 @@ export default function DashboardPage() {
       const users = await usersApi.list();
       setAllUsers(users.filter((u: AppUserBasic) => u.id !== user?.id));
       setSelectedUserIds([]);
+      setUserSearch('');
       setShareModal({ comparisonId: comparison.id, comparisonName: comparison.clientName || 'Untitled' });
     } catch {
       setModal({ title: 'Error', message: 'Failed to load users.', variant: 'info' });
@@ -272,26 +274,40 @@ export default function DashboardPage() {
       {/* Share Modal */}
       {shareModal && (
         <div className="modal-backdrop" onClick={() => setShareModal(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <h3>Share "{shareModal.comparisonName}"</h3>
-            <p className="muted" style={{ marginBottom: '1rem' }}>Select users to share this comparison with:</p>
+            <p className="muted">Select users to share this comparison with:</p>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Search users by name or email..."
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+              autoFocus
+            />
             <div className="share-user-list">
               {allUsers.length === 0 ? (
                 <p className="muted">No other users available.</p>
               ) : (
-                allUsers.map((u) => (
-                  <label key={u.id} className="share-user-item">
-                    <input
-                      type="checkbox"
-                      checked={selectedUserIds.includes(u.id)}
-                      onChange={() => toggleUserSelection(u.id)}
-                    />
-                    <span>
-                      <strong>{u.displayName}</strong>
-                      <small className="muted"> ({u.email})</small>
-                    </span>
-                  </label>
-                ))
+                allUsers
+                  .filter((u) => {
+                    if (!userSearch.trim()) return true;
+                    const q = userSearch.toLowerCase();
+                    return u.displayName.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
+                  })
+                  .map((u) => (
+                    <label key={u.id} className="share-user-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedUserIds.includes(u.id)}
+                        onChange={() => toggleUserSelection(u.id)}
+                      />
+                      <span>
+                        <strong>{u.displayName}</strong>
+                        <small className="muted"> ({u.email})</small>
+                      </span>
+                    </label>
+                  ))
               )}
             </div>
             <div className="modal-actions">
